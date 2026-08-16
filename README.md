@@ -1,5 +1,9 @@
 # Slice
 
+<p align="center">
+  <img src="docs/assets/slice_logo.svg" alt="Slice logo" width="420">
+</p>
+
 Slice is a Linux x86-64 percentile profiler for one focused question:
 
 > What does the call stack look like during the slowest executions of one C++ function?
@@ -21,6 +25,67 @@ bars.
 
 That makes the slow tail easy to find with a `p95:p100` query and makes the
 off-CPU contribution visible.
+
+## Example output
+
+The self-contained viewer shows the complete invocation population, timeline,
+latency histogram, and selected execution paths:
+
+![Slice viewer showing the complete bimodal population](docs/assets/p0-p100.png)
+
+Selecting the slow tail narrows the histogram, timeline, and flame graph to the
+chosen percentile window:
+
+![Slice viewer showing the p95:p100 slow tail](docs/assets/p95-p100.png)
+
+## Ubuntu / generic Linux setup
+
+Slice currently targets 64-bit Linux. The commands below are written for
+Ubuntu 22.04 or 24.04 and should be straightforward to adapt to other
+distributions.
+
+Install the native, BPF, and Rust build dependencies:
+
+```bash
+sudo apt update
+sudo apt install -y \
+  build-essential clang llvm libclang-dev libbpf-dev libelf-dev zlib1g-dev \
+  pkg-config cmake ninja-build linux-headers-$(uname -r) curl git
+```
+
+Install Rust 1.85 or newer with `rustup` if it is not already available:
+
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source "$HOME/.cargo/env"
+rustup default stable
+```
+
+From the repository root, run the tests and build the native fixture:
+
+```bash
+cargo test --workspace
+cmake -S fixtures -B build/fixtures -G Ninja
+cmake --build build/fixtures
+```
+
+Build the CLI in release mode:
+
+```bash
+cargo build --release
+```
+
+Before a live capture, check that the running kernel exposes BTF and the
+required scheduler tracepoint. Capture generally needs root privileges because
+it uses eBPF and perf events:
+
+```bash
+sudo ./target/release/slice doctor
+```
+
+If `slice doctor` reports missing BTF or tracefs permissions, use a distro
+kernel with BTF enabled and make sure `/sys/kernel/btf/vmlinux` and tracefs
+are mounted. The exact kernel configuration is distribution-specific.
 
 ## NixOS setup
 
@@ -63,29 +128,37 @@ the local flake from being used.
 
 ## Profile the bimodal fixture
 
-There are two reliable ways to start the privileged CLI. For a single
-command, use:
+Choose the CLI path for the rest of the walkthrough:
 
 ```bash
-sudo nix shell .#default --command slice doctor
+# Ubuntu / generic Linux source build
+SLICE=./target/release/slice
+
+# NixOS packaged build (run this inside the prepared NixOS shell)
+SLICE=slice
 ```
 
-For an interactive root shell, use this form instead:
+On Ubuntu, the first prerequisite check is:
+
+```bash
+sudo "$SLICE" doctor
+```
+
+On NixOS: 
 
 ```bash
 sudo nix shell .#default --command bash --noprofile --norc -i
 ```
 
-Then run the commands below as `slice ...`. Do not run `nix develop` in that
-shell.
+Then run the commands below using `$SLICE ...`.
 
 ### 1. Check capture prerequisites
 
 ```bash
-slice doctor
+sudo "$SLICE" doctor
 ```
 
-Root is normally enough for this POC on a local NixOS machine. The output
+Root is normally enough for this POC on a standard Ubuntu or NixOS kernel. The output
 should report available kernel BTF and a permitted `sched_switch` tracepoint.
 If it still reports a permission or kernel problem, the issue is with the
 host's eBPF/tracefs configuration, not with the Nix shell.
@@ -93,7 +166,7 @@ host's eBPF/tracefs configuration, not with the Nix shell.
 ### 2. Find the exact function signature
 
 ```bash
-slice symbols build/fixtures/bimodal_service --match handle_request
+"$SLICE" symbols build/fixtures/bimodal_service --match handle_request
 ```
 
 Copy the complete demangled signature from the output. For this fixture it is:
@@ -108,10 +181,10 @@ Run Slice as the supervisor so it launches the fixture, attaches before the
 first request, and captures until you stop it:
 
 ```bash
-slice profile \
+sudo "$SLICE" profile \
   --function 'BimodalFixture::handle_request(unsigned long)' \
   --output bimodal.slice \
-  build/fixtures/bimodal_service -- --workers 4
+  build/fixtures/bimodal_service -- --workers 6
 ```
 
 The fixture runs continuously. Let it run for roughly 10 seconds, then press
@@ -132,7 +205,7 @@ reported `slice doctor` or kernel error before trying to view the file.
 Render the capture through the packaged CLI:
 
 ```bash
-slice view bimodal.slice --output bimodal.html
+"$SLICE" view bimodal.slice --output bimodal.html
 ```
 
 Open the generated file in a browser:
@@ -141,30 +214,6 @@ Open the generated file in a browser:
 firefox bimodal.html
 ```
 
-## Inspect the slow percentile
-
-The slow mode is the upper tail of the bimodal population. Render only the
-slowest 5% of invocations and select the off-CPU metric:
-
-```bash
-nix shell .#default --command slice view bimodal.slice \
-  --output bimodal-p95.html \
-  --percentile 95:100 \
-  --metric off-cpu
-```
-
-Open it with:
-
-```bash
-firefox bimodal-p95.html
-```
-
-The report should emphasize `BimodalFixture::slow_path()`. Its wall-time view
-includes the roughly 15 ms scheduler wait, while its CPU-time view mostly shows
-the roughly 5 ms of post-wait work. The off-CPU view exposes the scheduler
-wait, and middle latency windows can include both paths because the bands
-overlap.
-The HTML file is self-contained and can be shared without the `.slice` file.
 
 ## Useful commands
 
