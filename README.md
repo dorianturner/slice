@@ -19,12 +19,10 @@ The walkthrough below uses the `bimodal_service` fixture. It has an approximate
 - 30% of calls take roughly 20 ms total with a 5 ms standard deviation, split
   between scheduler wait and 5 ms of CPU work.
 
-The jitter makes the histogram look like a real bimodal population, with
-samples between and across the two peaks instead of only two exact-duration
-bars.
+## Current limitations
 
-That makes the slow tail easy to find with a `p95:p100` query and makes the
-off-CPU contribution visible.
+- **Language support:** C++ only.
+- **Execution model:** The selected function must execute entirely on one thread. Cross-thread or asynchronous handoffs are not currently supported.
 
 ## Example output
 
