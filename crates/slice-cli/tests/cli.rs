@@ -37,6 +37,45 @@ fn fixture_profile_and_offline_viewer_are_usable_from_the_cli() {
 }
 
 #[test]
+fn bimodal_fixture_shows_slow_path_and_thread_timeline_in_the_viewer() {
+    let temp = tempdir().unwrap();
+    let capture = temp.path().join("bimodal.slice");
+    let report = temp.path().join("bimodal.html");
+
+    Command::cargo_bin("slice")
+        .unwrap()
+        .args([
+            "fixture-profile",
+            "--scenario",
+            "bimodal",
+            "--output",
+            capture.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+    Command::cargo_bin("slice")
+        .unwrap()
+        .args([
+            "view",
+            capture.to_str().unwrap(),
+            "--output",
+            report.to_str().unwrap(),
+            "--percentile",
+            "95:100",
+            "--metric",
+            "off-cpu",
+        ])
+        .assert()
+        .success();
+
+    let html = std::fs::read_to_string(report).unwrap();
+    assert!(html.contains("BimodalFixture::slow_path()"));
+    assert!(html.contains("id=\"timeline\""));
+    assert!(html.contains("slice-worker-1"));
+    assert!(html.contains("Off-CPU time"));
+}
+
+#[test]
 fn profile_command_requires_an_exact_entry_point_and_exposes_capture_controls() {
     Command::cargo_bin("slice")
         .unwrap()
@@ -46,6 +85,20 @@ fn profile_command_requires_an_exact_entry_point_and_exposes_capture_controls() 
         .stdout(predicate::str::contains("--pid"))
         .stdout(predicate::str::contains("--module"))
         .stdout(predicate::str::contains("--function"))
-        .stdout(predicate::str::contains("--duration"))
-        .stdout(predicate::str::contains("PROGRAM"));
+        .stdout(predicate::str::contains("--duration").not())
+        .stdout(predicate::str::contains("PROGRAM"))
+        .stdout(predicate::str::contains("--output"));
+}
+
+#[test]
+fn doctor_explains_privileged_capture_requirements() {
+    Command::cargo_bin("slice")
+        .unwrap()
+        .args(["doctor"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("CAP_BPF"))
+        .stdout(predicate::str::contains("CAP_PERFMON"))
+        .stdout(predicate::str::contains("Max locked memory"))
+        .stdout(predicate::str::contains("sudo"));
 }

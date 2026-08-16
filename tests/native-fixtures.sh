@@ -14,3 +14,5 @@ ctest --test-dir "$slice_test_build" --output-on-failure
 # against a real PIE executable built by the fixture toolchain.
 slice_symbols=$(cargo run --quiet -p slice-cli -- symbols "$slice_test_build/tail_divergence" --match 'SliceFixture::work')
 grep -F $'\tSliceFixture::work(unsigned int)' <<<"$slice_symbols"
+bimodal_symbols=$(cargo run --quiet -p slice-cli -- symbols "$slice_test_build/bimodal_service" --match 'BimodalFixture::handle_request')
+grep -F $'\tBimodalFixture::handle_request(unsigned long)' <<<"$bimodal_symbols"

@@ -2,13 +2,18 @@
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand, ValueEnum};
 use cpp_demangle::Symbol;
 use object::{Object, ObjectSegment, ObjectSymbol, SymbolKind};
 use slice_core::{
-    Function, Metric, PercentileRange, Profile, Query, TimeRange, tail_divergence_profile,
+    Function, Metric, PercentileRange, Profile, Query, TimeRange, bimodal_profile,
+    tail_divergence_profile,
 };
 
 #[derive(Debug, Parser)]
@@ -34,10 +39,13 @@ enum Command {
         #[arg(long)]
         r#match: Option<String>,
     },
-    /// Create the deterministic tail-divergence profile used by tests and demos.
+    /// Create a deterministic profile used by tests and demos.
     FixtureProfile {
         #[arg(short, long, default_value = "tail-divergence.slice")]
         output: PathBuf,
+        /// Select the offline scenario.
+        #[arg(long, value_enum, default_value_t = FixtureScenario::Tail)]
+        scenario: FixtureScenario,
     },
     /// Profile a started or launched process at one exact demangled ELF function.
     Profile {
@@ -50,9 +58,6 @@ enum Command {
         /// Full demangled function signature printed by `slice symbols`.
         #[arg(long)]
         function: String,
-        /// Capture duration, for example 2s or 500ms.
-        #[arg(long, default_value = "10s")]
-        duration: String,
         #[arg(short, long, default_value = "capture.slice")]
         output: PathBuf,
         /// Program to launch and profile. Omit this when using --pid.
@@ -92,6 +97,12 @@ enum CliMetric {
     OffCpu,
 }
 
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum FixtureScenario {
+    Tail,
+    Bimodal,
+}
+
 impl From<CliMetric> for Metric {
     fn from(value: CliMetric) -> Self {
         match value {
@@ -109,8 +120,12 @@ fn main() -> Result<()> {
             module,
             r#match,
         } => list_symbols(module.as_ref().unwrap_or(&binary), r#match.as_deref()),
-        Command::FixtureProfile { output } => {
-            tail_divergence_profile().write_to_path(&output)?;
+        Command::FixtureProfile { output, scenario } => {
+            let profile = match scenario {
+                FixtureScenario::Tail => tail_divergence_profile(),
+                FixtureScenario::Bimodal => bimodal_profile(),
+            };
+            profile.write_to_path(&output)?;
             println!("wrote {}", output.display());
             Ok(())
         }
@@ -118,11 +133,10 @@ fn main() -> Result<()> {
             pid,
             module,
             function,
-            duration,
             output,
             program,
             args,
-        } => profile(pid, module, function, duration, output, program, args),
+        } => profile(pid, module, function, output, program, args),
         Command::View {
             profile,
             output,
@@ -245,50 +259,69 @@ fn profile(
     pid: Option<u32>,
     module: Option<PathBuf>,
     function: String,
-    duration: String,
     output: PathBuf,
     program: Option<PathBuf>,
     args: Vec<String>,
 ) -> Result<()> {
-    let mut child = None;
-    let (pid, module, command, resume_after_attach) = match (pid, program) {
+    let (running_pid, module, launch_program) = match (pid, program) {
         (Some(pid), None) => (
-            pid,
+            Some(pid),
             module.context("--module is required when using --pid")?,
-            Vec::new(),
-            false,
+            None,
         ),
         (None, Some(program)) => {
             let module = module.unwrap_or_else(|| program.clone());
-            let mut command = std::process::Command::new(&program);
-            command.args(&args);
-            let launched = command
-                .spawn()
-                .with_context(|| format!("launching {}", program.display()))?;
-            let pid = launched.id();
-            // Stop at the earliest safe point, then let capture_pid resume the
-            // process only after all links and samplers have been installed.
-            slice_ebpf::stop_process(pid)?;
-            std::thread::sleep(std::time::Duration::from_millis(10));
-            let command = std::iter::once(program.display().to_string())
-                .chain(args.iter().cloned())
-                .collect();
-            child = Some(launched);
-            (pid, module, command, true)
+            (None, module, Some(program))
         }
         (Some(_), Some(_)) => bail!("choose either --pid or PROGRAM, not both"),
         (None, None) => bail!("provide --pid or a PROGRAM to launch"),
     };
-    let selected = match select_symbol(&module, &function) {
-        Ok(selected) => selected,
-        Err(error) => {
-            if let Some(launched) = child.as_ref() {
-                let _ = slice_ebpf::kill_process(launched.id());
-            }
+    let selected = select_symbol(&module, &function)?;
+
+    let (pid, command, resume_after_attach, mut child) = if let Some(pid) = running_pid {
+        (pid, Vec::new(), false, None)
+    } else {
+        let program = launch_program.expect("launch program is present when PID is absent");
+        let mut command = std::process::Command::new(&program);
+        command.args(&args);
+        let launched = command
+            .spawn()
+            .with_context(|| format!("launching {}", program.display()))?;
+        let pid = launched.id();
+        // Stop at the earliest safe point, then let capture_pid resume the
+        // process only after every link and sampler is live.
+        if let Err(error) =
+            slice_ebpf::stop_process(pid).and_then(|_| slice_ebpf::wait_for_stopped(pid))
+        {
+            let _ = slice_ebpf::kill_process(pid);
             return Err(error);
         }
+        let command = std::iter::once(program.display().to_string())
+            .chain(args.iter().cloned())
+            .collect();
+        (pid, command, true, Some(launched))
     };
-    let duration = std::time::Duration::from_nanos(parse_duration_ns(&duration)?);
+    let stop_requested = Arc::new(AtomicBool::new(false));
+    let stop_for_handler = Arc::clone(&stop_requested);
+    let child_pid = child.as_ref().map(std::process::Child::id);
+    if let Err(error) = ctrlc::set_handler(move || {
+        stop_for_handler.store(true, Ordering::SeqCst);
+        if let Some(child_pid) = child_pid {
+            let _ = slice_ebpf::interrupt_process(child_pid);
+        }
+    })
+    .context("installing Ctrl-C handler")
+    {
+        if let Some(launched) = child.as_ref() {
+            let _ = slice_ebpf::kill_process(launched.id());
+        }
+        return Err(error);
+    }
+
+    eprintln!(
+        "capturing {} at PID {pid}; stop the target or press Ctrl-C to finish",
+        selected.demangled_name
+    );
     let function = Function {
         id: 1,
         module: module.display().to_string(),
@@ -304,8 +337,8 @@ fn profile(
         module,
         function,
         probe_offset: selected.probe_offset,
-        duration,
         command,
+        stop_requested,
         resume_after_attach,
     };
     let profile = match slice_ebpf::capture_pid(&request)
@@ -319,13 +352,13 @@ fn profile(
             return Err(error);
         }
     };
-    if let Err(error) = profile.write_to_path(&output) {
+    if let Err(error) = write_profile_atomically(&profile, &output) {
         if let Some(launched) = child.as_ref() {
             let _ = slice_ebpf::kill_process(launched.id());
         }
-        return Err(error.into());
+        return Err(error);
     }
-    if let Some(mut launched) = child {
+    if let Some(mut launched) = child.take() {
         launched.wait().context("waiting for launched target")?;
     }
     println!(
@@ -334,6 +367,23 @@ fn profile(
         output.display()
     );
     Ok(())
+}
+
+fn write_profile_atomically(profile: &Profile, output: &std::path::Path) -> Result<()> {
+    let file_name = output
+        .file_name()
+        .and_then(|name| name.to_str())
+        .context("profile output path must have a valid file name")?;
+    let temporary = output.with_file_name(format!(".{file_name}.tmp-{}", std::process::id()));
+    let result = (|| -> Result<()> {
+        std::fs::write(&temporary, profile.to_bytes()?)?;
+        std::fs::rename(&temporary, output)?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temporary);
+    }
+    result
 }
 
 fn view(
@@ -391,32 +441,97 @@ fn discover(profile_path: PathBuf) -> Result<()> {
 
 fn doctor() -> Result<()> {
     let btf = std::path::Path::new("/sys/kernel/btf/vmlinux").exists();
-    let tracefs = [
-        "/sys/kernel/tracing/events/sched/sched_switch/format",
-        "/sys/kernel/debug/tracing/events/sched/sched_switch/format",
-    ]
-    .iter()
-    .any(|path| std::path::Path::new(path).exists());
+    let tracefs = tracepoint_status();
     let perf = std::fs::read_to_string("/proc/sys/kernel/perf_event_paranoid")
         .unwrap_or_else(|_| "unavailable".to_owned());
     let unprivileged_bpf = std::fs::read_to_string("/proc/sys/kernel/unprivileged_bpf_disabled")
         .unwrap_or_else(|_| "unavailable".to_owned());
+    let memlock = std::fs::read_to_string("/proc/self/limits")
+        .ok()
+        .and_then(|limits| {
+            limits
+                .lines()
+                .find(|line| line.starts_with("Max locked memory"))
+                .map(str::to_owned)
+        })
+        .unwrap_or_else(|| "unavailable".to_owned());
     println!("Slice capture prerequisites");
     println!("  architecture: {}", std::env::consts::ARCH);
     println!(
         "  kernel BTF: {}",
         if btf { "available" } else { "missing" }
     );
-    println!(
-        "  sched_switch tracepoint: {}",
-        if tracefs { "available" } else { "missing" }
-    );
+    println!("  sched_switch tracepoint: {tracefs}");
     println!("  perf_event_paranoid: {}", perf.trim());
     println!("  unprivileged_bpf_disabled: {}", unprivileged_bpf.trim());
+    println!("  {memlock}");
+    println!(
+        "  effective CAP_BPF: {}",
+        if effective_capability(39) {
+            "yes"
+        } else {
+            "no"
+        }
+    );
+    println!(
+        "  effective CAP_PERFMON: {}",
+        if effective_capability(38) {
+            "yes"
+        } else {
+            "no"
+        }
+    );
+    println!(
+        "  effective CAP_SYS_PTRACE: {}",
+        if effective_capability(19) {
+            "yes"
+        } else {
+            "no"
+        }
+    );
     println!(
         "  capture requires root or CAP_BPF,CAP_PERFMON and CAP_SYS_PTRACE for unrelated --pid targets"
     );
+    println!(
+        "  if these checks fail, the Nix shell cannot fix it; run the capture with sudo or grant the binary capabilities"
+    );
     Ok(())
+}
+
+fn tracepoint_status() -> &'static str {
+    let paths = [
+        "/sys/kernel/tracing/events/sched/sched_switch/format",
+        "/sys/kernel/debug/tracing/events/sched/sched_switch/format",
+    ];
+    let mut permission_denied = false;
+    for path in paths {
+        match std::fs::read_to_string(path) {
+            Ok(_) => return "available",
+            Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+                permission_denied = true;
+            }
+            Err(_) => {}
+        }
+    }
+    if permission_denied {
+        "permission denied"
+    } else {
+        "missing"
+    }
+}
+
+fn effective_capability(bit: u32) -> bool {
+    let Ok(status) = std::fs::read_to_string("/proc/self/status") else {
+        return false;
+    };
+    let Some(value) = status
+        .lines()
+        .find_map(|line| line.strip_prefix("CapEff:\t"))
+        .and_then(|value| u64::from_str_radix(value.trim(), 16).ok())
+    else {
+        return false;
+    };
+    value & (1_u64 << bit) != 0
 }
 
 fn parse_threads(value: &str) -> Result<BTreeSet<u32>> {

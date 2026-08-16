@@ -1,4 +1,7 @@
 /target/
+/build/
+/*.slice
+/*.html
 /result
 /result-*
 /graphify-out/
