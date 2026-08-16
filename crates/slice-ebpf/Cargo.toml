@@ -1,0 +1,22 @@
+[package]
+name = "slice-ebpf"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+build = "build.rs"
+
+[dependencies]
+anyhow.workspace = true
+cpp_demangle.workspace = true
+libc = "0.2.189"
+libbpf-rs = { version = "0.26.2", default-features = false }
+object.workspace = true
+slice-collector = { path = "../slice-collector" }
+slice-core = { path = "../slice-core" }
+
+[build-dependencies]
+libbpf-cargo = { version = "0.26.2", default-features = false }
+
+[lints]
+workspace = true

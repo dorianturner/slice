@@ -1,0 +1,6 @@
+/target/
+/result
+/result-*
+/graphify-out/
+/.graphify_*.json
+/.graphify_*.txt
