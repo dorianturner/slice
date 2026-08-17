@@ -19,6 +19,267 @@ The walkthrough below uses the `bimodal_service` fixture. It has an approximate
 - 30% of calls take roughly 20 ms total with a 5 ms standard deviation, split
   between scheduler wait and 5 ms of CPU work.
 
+## Architecture at a glance
+
+The most important design decision is the boundary between the kernel and
+userspace: eBPF performs only small, bounded capture operations, while
+userspace owns symbolization, correlation, percentile selection, storage, and
+visualization.
+
+```mermaid
+flowchart LR
+    User["slice CLI"] --> Symbols["ELF symbol discovery<br/>demangle + exact match"]
+    User --> ProfileCmd["profile command"]
+    User --> ViewCmd["view / discover"]
+
+    ProfileCmd --> Supervisor["Optional target supervisor<br/>launch, stop, resume, Ctrl-C"]
+    ProfileCmd --> Capture["slice-ebpf<br/>userspace capture"]
+    Supervisor --> Capture
+
+    Capture --> Loader["Load BPF skeleton<br/>configure target TGID/function"]
+    Loader --> Kernel
+
+    subgraph Kernel["Linux kernel eBPF"]
+        Entry["uprobe: function entry"]
+        Return["uretprobe: function return"]
+        Sample["perf_event: periodic user stack"]
+        Sched["sched_switch: off-CPU intervals"]
+        Active["active_by_tid"]
+        Stacks["stack_traces map"]
+        OffCPU["offcpu_by_tid"]
+        Ring["ring buffer events"]
+
+        Entry --> Active
+        Return --> Active
+        Sample --> Active
+        Sample --> Stacks
+        Sched --> Active
+        Sched --> OffCPU
+        Entry --> Ring
+        Return --> Ring
+        Sample --> Ring
+        Sched --> Ring
+    end
+
+    Ring --> Decode["Userspace event decoding"]
+    Stacks --> Resolve["ELF + /proc mapping resolver<br/>addresses → symbolized frames"]
+    Decode --> Correlator["slice-collector<br/>invocation correlator"]
+    Resolve --> Correlator
+
+    Correlator --> Profile["slice-core::Profile<br/>invocations, stacks, samples,<br/>threads, metadata, quality"]
+    Profile --> Store["Versioned .slice file<br/>JSON + zstd, atomic write"]
+
+    Store --> ViewCmd
+    ViewCmd --> Query["slice-core query engine<br/>thread/time/metric/percentile filters"]
+    Profile --> Query
+    Query --> Result["Flame tree + latency statistics"]
+    Result --> Render["slice-render"]
+    Render --> HTML["Self-contained interactive HTML"]
+```
+
+### Runtime flow
+
+1. `slice profile` resolves an exact demangled C++ function to an ELF address.
+2. The CLI attaches to an existing PID or launches a child, stops it before
+   the first interesting call, installs instrumentation, and resumes it.
+3. Kernel instrumentation emits function-entry, function-return, stack-sample,
+   and scheduler-wait events through a BPF ring buffer.
+4. Userspace retrieves stack IDs, resolves addresses against ELF and
+   `/proc/<pid>/maps`, and converts events into collector events.
+5. The collector correlates events into valid invocations and deduplicated
+   stacks, while recording dropped or inconsistent data in quality counters.
+6. `slice-core::Profile` becomes the stable boundary between capture, storage,
+   analysis, tests, and rendering.
+7. `slice view` filters valid invocations by thread, time, metric, and latency
+   percentile, then builds a weighted flame tree for the selected executions.
+8. `slice-render` embeds the result into one offline HTML file.
+
+### The central profile model
+
+`slice-core::Profile` contains the semantic capture contract:
+
+```text
+Profile
+├── metadata
+├── functions
+├── threads
+├── invocations
+├── deduplicated stacks
+├── weighted samples
+└── capture quality counters
+```
+
+Each sample points to an invocation and a deduplicated stack. Samples also
+carry an execution state (`on_cpu` or `off_cpu`) and a duration weight. This
+lets the query engine distinguish wall time, CPU time, and scheduler wait
+without recollecting the workload.
+
+The profile is serialized as versioned JSON compressed with zstd and prefixed
+with a file magic. Capture writes it atomically, so a failed or interrupted
+write does not replace a previously valid output file.
+
+### Why this architecture works well
+
+- **Small kernel surface:** BPF does not symbolize, sort, calculate
+  percentiles, or render HTML. The kernel path stays bounded and auditable.
+- **Stable boundaries:** `slice-core` has no eBPF, filesystem, or HTML
+  dependencies. Capture and rendering can evolve independently around the
+  profile format.
+- **Explicit correctness:** Nested calls, unmatched returns, dropped events,
+  dropped stacks, and unfinished invocations become visible quality metrics
+  instead of silently contaminating percentile results.
+- **Efficient events:** The kernel sends compact IDs and weights through the
+  ring buffer; full stack resolution happens in userspace.
+- **Testability:** The collector consumes abstract events, and `slice-core`
+  provides deterministic synthetic profiles for tests and demos without a live
+  kernel capture.
+- **Reproducible analysis:** Percentile selection and metric filtering happen
+  offline from the captured profile, so the same `.slice` file can be queried
+  repeatedly.
+
+### Current trade-offs
+
+- Linux x86-64 and C++ are currently supported.
+- The selected function must execute entirely on one thread; cross-thread and
+  asynchronous handoffs are not modeled.
+- Nested invocations of the selected function are invalidated rather than
+  modeled as a full invocation tree.
+- Sampling is statistical, so extremely short work can be underrepresented.
+- Long captures accumulate events and stacks in userspace memory.
+- Ring-buffer and stack-capture loss is possible, but the profile exposes
+  counters so consumers can judge capture quality.
+
+### Interview-ready summary
+
+> Slice is a percentile-conditioned profiler built as a Rust workspace with a
+> small C eBPF kernel component. The CLI resolves an exact demangled ELF
+> function and attaches entry/return uprobes, a perf-event stack sampler, and a
+> scheduler tracepoint. The BPF side tracks active invocations by thread and
+> emits compact events through a ring buffer. Userspace resolves stack IDs to
+> symbols and feeds normalized events into a correlator, which produces a
+> versioned `Profile` containing invocations, deduplicated stacks, weighted
+> samples, and capture-quality counters. The query engine selects valid
+> invocations by duration percentile and metric—wall time, CPU time, or off-CPU
+> time—and builds a flame tree. Finally, the renderer embeds everything into a
+> self-contained HTML report. The key architectural choice is keeping the
+> kernel path minimal and making `Profile` the stable boundary between
+> capture, analysis, storage, and visualization.
+
+## Technologies and how Slice uses them
+
+### Rust and Cargo workspaces
+
+Rust provides the userspace implementation, type-safe profile model, CLI, BPF
+loader, collector, and renderer. Cargo organizes the repository into focused
+crates:
+
+| Crate | Responsibility |
+| --- | --- |
+| `slice-core` | Profile format, data model, percentile query engine, synthetic profiles |
+| `slice-collector` | Correlates raw capture events into invocations and samples |
+| `slice-ebpf` | Loads BPF, attaches probes, reads ring-buffer events, resolves stacks |
+| `slice-render` | Generates the interactive self-contained HTML viewer |
+| `slice-cli` | User-facing commands and capture/view orchestration |
+
+The workspace definition is in [`Cargo.toml`](Cargo.toml).
+
+### eBPF
+
+eBPF lets a program run inside the Linux kernel in response to carefully
+defined events. The program is verified before loading and communicates with
+userspace through maps and event buffers.
+
+Slice uses a deliberately small C eBPF program in
+[`crates/slice-ebpf/bpf/slice.bpf.c`](crates/slice-ebpf/bpf/slice.bpf.c). It
+tracks only the selected function and emits compact records. Symbolization,
+allocation-heavy reconstruction, and percentile math remain in Rust.
+
+### Uprobes and uretprobes
+
+An **uprobe** is a dynamic instrumentation hook placed at a userspace
+instruction, usually a function entry in an ELF binary. A **uretprobe** runs
+when that function returns.
+
+Slice attaches an uprobe and uretprobe to the exact ELF offset of the selected
+C++ function. The entry hook creates an active invocation keyed by TID; the
+return hook closes it and supplies the duration boundary. This gives Slice a
+complete population of function executions, rather than only a sample of
+executions.
+
+The attachment is performed in
+[`capture_pid`](crates/slice-ebpf/src/lib.rs), while the kernel handlers are
+`slice_entry` and `slice_return` in the BPF source.
+
+### Perf events
+
+Linux perf events provide periodic sampling driven by hardware or software
+performance counters. Slice opens a timer-like perf event on each available
+CPU and attaches the `slice_sample` BPF program to it.
+
+When a target thread has an active selected invocation, the sampler captures a
+user stack and associates a sampling-period weight with that invocation. This
+approximates on-CPU time and supplies the stack population used by the flame
+graph.
+
+### Scheduler tracepoints and off-CPU time
+
+`sched_switch` is a Linux tracepoint emitted when the scheduler switches tasks.
+Slice watches it to detect when an active invocation is descheduled and when
+it resumes. The interval between those events becomes an off-CPU sample.
+
+This is why the viewer can compare:
+
+- **Wall:** all samples,
+- **CPU:** on-CPU samples only,
+- **Off-CPU:** scheduler-wait samples only.
+
+### BPF maps and ring buffers
+
+Slice uses several BPF maps:
+
+- `active_by_tid`: current selected invocation for each thread;
+- `offcpu_by_tid`: timestamp at which an active thread was descheduled;
+- `stack_traces`: deduplicated kernel-side storage for user stack addresses;
+- `config`: target TGID, function ID, and sampling period;
+- counters for dropped events and samples.
+
+The ring buffer carries fixed-width event records. The event contains IDs,
+timestamps, TID, CPU, stack ID, and weight rather than a full raw stack. Rust
+looks up the stack separately and resolves it outside the kernel.
+
+### ELF parsing and C++ demangling
+
+The CLI uses ELF symbol information to list candidate functions and requires an
+exact demangled signature for capture. This avoids ambiguous attachment to
+overloaded or duplicated symbols. The capture resolver also uses ELF segments
+and `/proc/<pid>/maps` to translate sampled instruction addresses into readable
+frames.
+
+### Serde, zstd, and the `.slice` format
+
+`serde` and `serde_json` provide the portable in-memory representation. zstd
+compresses the serialized JSON for smaller profile files. A version number and
+file magic allow the loader to reject incompatible or corrupt input early.
+
+### HTML, SVG, and JavaScript
+
+`slice-render` produces a single HTML document containing the data and viewer
+logic. The viewer renders the timeline, latency histogram, and flame graph in
+the browser using SVG and JavaScript. It has no server dependency, which makes
+profiles easy to archive or share as artifacts.
+
+### CMake, Ninja, Nix, and Linux kernel facilities
+
+- **CMake/Ninja:** build the native C++ fixtures used for live profiling.
+- **Nix flakes:** pin compiler, Rust, CMake, Ninja, and BPF build tooling.
+- **BTF:** kernel type information used by modern eBPF tooling and required by
+  the supported setup.
+- **tracefs:** exposes the `sched_switch` tracepoint and its permissions.
+- **Linux capabilities:** live capture commonly needs root or capabilities
+  such as `CAP_BPF`, `CAP_PERFMON`, and, for unrelated PIDs, `CAP_SYS_PTRACE`.
+
+`slice doctor` checks the host-side prerequisites before a capture.
+
 ## Current limitations
 
 - **Language support:** C++ only.
