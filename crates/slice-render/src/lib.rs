@@ -73,7 +73,7 @@ pub fn render_html(profile: &Profile, query: &Query) -> Result<String, RenderErr
     <div id="timeline-scroll" class="timeline-scroll"><div id="timeline-labels-scroll" class="timeline-labels-scroll"><svg id="timeline-labels" aria-hidden="true"></svg></div><div id="timeline-chart-scroll" class="timeline-chart-scroll"><svg id="timeline" role="img" aria-label="Capture timeline with one lane per thread"></svg></div></div>
   </section>
   <section class="controls" aria-label="Profile controls">
-    <fieldset><legend><span>Invocation latency</span><span id="percentile-label" class="range-editor percentile-editor"><span aria-hidden="true">p</span><input id="pct-low" class="range-input percentile-input" type="number" min="0" max="100" step="1" aria-label="Lower latency percentile"><span aria-hidden="true">: p</span><input id="pct-high" class="range-input percentile-input" type="number" min="0" max="100" step="1" aria-label="Upper latency percentile"></span></legend><svg id="histogram" viewBox="0 0 720 126" preserveAspectRatio="none" role="img" aria-label="Invocation latency histogram"></svg></fieldset>
+    <fieldset><legend><span>Invocation latency</span><span id="percentile-label" class="range-editor percentile-editor"><span aria-hidden="true">p</span><input id="pct-low" class="range-input percentile-input" type="number" min="0" max="100" step="1" aria-label="Lower latency percentile"><span aria-hidden="true">: p</span><input id="pct-high" class="range-input percentile-input" type="number" min="0" max="100" step="1" aria-label="Upper latency percentile"></span><label class="histogram-bucket-control">Bucket <select id="histogram-bucket-size" class="histogram-bucket-select" aria-label="Histogram bucket size"><option value="auto">Auto</option><option value="250000">0.25 ms</option><option value="500000">0.50 ms</option><option value="1000000">1.00 ms</option><option value="2000000">2.00 ms</option><option value="5000000">5.00 ms</option></select></label></legend><svg id="histogram" viewBox="0 0 720 126" preserveAspectRatio="none" role="img" aria-label="Invocation latency histogram"></svg></fieldset>
     <fieldset><legend>Metric</legend><select id="metric"><option value="wall">Wall time</option><option value="cpu">CPU time</option><option value="off_cpu">Off-CPU time</option></select><p class="control-help">Wall latency selects invocations; metric controls flame widths.</p></fieldset>
   </section>
   <section class="summary" aria-live="polite"><div><p>Selected invocations</p><strong id="selected-count"></strong><span id="latency-range"></span></div><div><p>Selected samples</p><strong id="sample-count"></strong><span id="sample-period"></span></div><div><p>Sampled CPU / off-CPU</p><strong id="cpu-time"></strong><span id="offcpu-time"></span></div></section>
@@ -102,7 +102,7 @@ h1,h2,p { margin:0; } h1 { font-size:clamp(2.5rem,6vw,5.2rem); line-height:.88; 
 .viewer-error { margin:14px 0; padding:10px 12px; border:3px solid var(--ink); background:var(--pink); color:var(--ink); box-shadow:5px 5px 0 var(--ink); font-size:.82rem; font-weight:800; }
 .population { display:flex; justify-content:space-between; gap:18px; padding:29px 0 22px; } .population h2 { display:inline-block; margin-top:8px; padding:6px 9px; border:3px solid var(--ink); background:var(--cyan); box-shadow:4px 4px 0 var(--ink); font-size:1.35rem; } .population .muted { margin-top:14px; } .capture-meta { display:flex; flex-direction:column; gap:5px; color:#454545; font-size:.75rem; font-weight:700; text-align:right; font-variant-numeric:tabular-nums; }
 .timeline-section,.flame-section { border:3px solid var(--ink); border-radius:0; background:var(--paper); box-shadow:8px 8px 0 var(--ink); padding:18px; } .timeline-section { margin-bottom:18px; } .section-heading { display:flex; justify-content:space-between; align-items:center; gap:14px; margin-bottom:8px; } .timeline-actions { display:flex; align-items:center; justify-content:flex-end; gap:12px; min-width:0; } .value { color:var(--ink); font-variant-numeric:tabular-nums; } .timeline-scroll { height:280px; max-width:100%; display:grid; grid-template-columns:170px minmax(0,1fr); overflow:hidden; margin-top:14px; border:3px solid var(--ink); background:var(--paper); box-shadow:5px 5px 0 var(--ink); overscroll-behavior:contain; } .timeline-labels-scroll,.timeline-chart-scroll { min-width:0; min-height:0; overflow-y:auto; overflow-x:hidden; scrollbar-width:none; } .timeline-labels-scroll::-webkit-scrollbar { width:0; height:0; } .timeline-chart-scroll { overflow:auto; } #timeline-labels,#timeline { display:block; background:var(--paper); } #timeline-labels { width:170px; } #timeline { min-height:120px; touch-action:none; } .timeline-bg { fill:var(--paper); } .timeline-lane { fill:#ece7dc; } .timeline-selection { fill:var(--yellow); opacity:.84; stroke:var(--ink); stroke-width:4; vector-effect:non-scaling-stroke; pointer-events:none; } .timeline-invocation { fill:var(--purple); opacity:.88; cursor:pointer; } .timeline-invocation.selected { fill:var(--pink); opacity:1; } .timeline-invocation:hover { stroke:var(--ink); stroke-width:2; } .timeline-sample { fill:#31bfc5; opacity:.7; pointer-events:none; } .timeline-text,.timeline-axis { fill:var(--ink); font-size:10px; dominant-baseline:middle; } .timeline-axis { font-size:9px; font-weight:800; } .thread-label { cursor:pointer; } .thread-label.inactive { fill:#999; text-decoration:line-through; } .time-handle { stroke:var(--pink); stroke-width:4; pointer-events:none; vector-effect:non-scaling-stroke; } .time-handle-hit { fill:transparent; cursor:ew-resize; }
-.controls { display:grid; grid-template-columns:minmax(0,2.8fr) minmax(180px,1fr); gap:18px; margin:18px 0; } fieldset { min-width:0; margin:0; border:3px solid var(--ink); border-radius:0; background:var(--paper); box-shadow:6px 6px 0 var(--ink); padding:13px; } legend { display:flex; align-items:center; gap:10px; color:var(--ink); font-size:.8rem; font-weight:900; padding:0 5px; white-space:nowrap; } input,select,button { accent-color:var(--pink); } .range-editor { display:flex; align-items:center; gap:5px; color:var(--ink); font-variant-numeric:tabular-nums; white-space:nowrap; } #time-label { padding:6px 8px; border:3px solid var(--ink); background:var(--yellow); box-shadow:4px 4px 0 var(--ink); } .range-editor label { display:flex; align-items:center; gap:4px; color:var(--ink); font-size:.76rem; font-weight:800; } .range-input { width:108px; min-width:108px; background:#fff; color:var(--ink); border:2px solid var(--ink); border-radius:0; padding:5px 6px; font:inherit; font-weight:700; font-variant-numeric:tabular-nums; } .percentile-editor { display:inline-flex; gap:7px; margin-left:4px; font-size:.8rem; } .percentile-input { width:64px; min-width:64px; text-align:center; padding:3px 2px; } select { width:100%; background:#fff; border:2px solid var(--ink); border-radius:0; color:var(--ink); padding:6px; font-weight:700; } .thread-picker { position:relative; flex:0 1 auto; min-width:180px; } .thread-picker summary { display:flex; align-items:center; justify-content:space-between; gap:12px; cursor:pointer; list-style:none; border:3px solid var(--ink); background:var(--cyan); box-shadow:4px 4px 0 var(--ink); color:var(--ink); padding:6px 8px; font-size:.78rem; font-weight:800; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; } .thread-picker summary::after { content:"▾"; flex:0 0 auto; font-size:1rem; line-height:1; } .thread-picker summary::-webkit-details-marker { display:none; } .thread-picker[open] summary { box-shadow:none; } .thread-list { position:absolute; z-index:3; left:0; right:0; display:grid; gap:4px; max-height:180px; overflow:auto; margin-top:3px; padding:7px; border:3px solid var(--ink); background:var(--paper); box-shadow:4px 4px 0 var(--ink); } .thread-list label { display:flex; gap:6px; align-items:center; padding:4px 5px; font-size:.74rem; font-weight:700; white-space:nowrap; cursor:pointer; } .control-help { color:#454545; font-size:.74rem; margin-top:10px; line-height:1.35; }
+.controls { display:grid; grid-template-columns:minmax(0,2.8fr) minmax(180px,1fr); gap:18px; margin:18px 0; } fieldset { min-width:0; margin:0; border:3px solid var(--ink); border-radius:0; background:var(--paper); box-shadow:6px 6px 0 var(--ink); padding:13px; } legend { display:flex; align-items:center; gap:10px; color:var(--ink); font-size:.8rem; font-weight:900; padding:0 5px; white-space:nowrap; } input,select,button { accent-color:var(--pink); } .range-editor { display:flex; align-items:center; gap:5px; color:var(--ink); font-variant-numeric:tabular-nums; white-space:nowrap; } #time-label { padding:6px 8px; border:3px solid var(--ink); background:var(--yellow); box-shadow:4px 4px 0 var(--ink); } .range-editor label { display:flex; align-items:center; gap:4px; color:var(--ink); font-size:.76rem; font-weight:800; } .range-input { width:108px; min-width:108px; background:#fff; color:var(--ink); border:2px solid var(--ink); border-radius:0; padding:5px 6px; font:inherit; font-weight:700; font-variant-numeric:tabular-nums; } .percentile-editor { display:inline-flex; gap:7px; margin-left:4px; font-size:.8rem; } .percentile-input { width:64px; min-width:64px; text-align:center; padding:3px 2px; } select { width:100%; background:#fff; border:2px solid var(--ink); border-radius:0; color:var(--ink); padding:6px; font-weight:700; } .histogram-bucket-control { display:flex; align-items:center; gap:5px; color:var(--ink); font-size:.76rem; font-weight:800; } .histogram-bucket-select { width:auto; min-width:84px; padding:3px 5px; font-size:.76rem; } .thread-picker { position:relative; flex:0 1 auto; min-width:180px; } .thread-picker summary { display:flex; align-items:center; justify-content:space-between; gap:12px; cursor:pointer; list-style:none; border:3px solid var(--ink); background:var(--cyan); box-shadow:4px 4px 0 var(--ink); color:var(--ink); padding:6px 8px; font-size:.78rem; font-weight:800; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; } .thread-picker summary::after { content:"▾"; flex:0 0 auto; font-size:1rem; line-height:1; } .thread-picker summary::-webkit-details-marker { display:none; } .thread-picker[open] summary { box-shadow:none; } .thread-list { position:absolute; z-index:3; left:0; right:0; display:grid; gap:4px; max-height:180px; overflow:auto; margin-top:3px; padding:7px; border:3px solid var(--ink); background:var(--paper); box-shadow:4px 4px 0 var(--ink); } .thread-list label { display:flex; gap:6px; align-items:center; padding:4px 5px; font-size:.74rem; font-weight:700; white-space:nowrap; cursor:pointer; } .control-help { color:#454545; font-size:.74rem; margin-top:10px; line-height:1.35; }
 #histogram { width:100%; height:86px; display:block; margin-bottom:4px; touch-action:none; } .histogram-rail { fill:#e2dccf; } .histogram-rail-selection { fill:#c9bfad; opacity:.95; stroke:var(--ink); stroke-width:3; } .hist-bar { fill:var(--cyan); } .hist-selected { fill:var(--pink); } .hist-label { fill:var(--ink); font-size:10px; font-weight:800; } .hist-axis-tick { stroke:#8c8170; stroke-width:1; } .hist-handle { stroke:var(--ink); stroke-width:3; stroke-dasharray:4 2; pointer-events:none; } .hist-handle-hit { fill:transparent; cursor:ew-resize; } .hist-window { fill:var(--yellow); opacity:.72; stroke:var(--ink); stroke-width:3; cursor:grab; }
 .timeline-chart-scroll { overflow-x:scroll; overflow-y:auto; scrollbar-width:auto; }
 .flame-zoom-path { display:flex; align-items:center; flex-wrap:wrap; gap:5px; min-height:28px; margin:4px 0 8px; color:var(--ink); font-size:.76rem; } .flame-zoom-path button { padding:3px 7px; background:var(--cyan); border:2px solid var(--ink); font-size:.74rem; } .flame-zoom-path button[aria-current="page"] { color:var(--ink); background:var(--yellow); } .flame-zoom-separator { color:var(--ink); font-weight:900; }
@@ -127,7 +127,7 @@ const JAVASCRIPT: &str = r##"
   const allThreadIds = threadRows.map(thread => thread.tid);
   const initialTime = initial.time || {from_ns:bounds.from, to_ns:bounds.to};
   const clampTime = value => Math.max(bounds.from, Math.min(bounds.to, value));
-  const state = { functionId:initial.function_id, threads:new Set(initial.threads || allThreadIds), time:{from_ns:clampTime(initialTime.from_ns),to_ns:clampTime(initialTime.to_ns)}, percentile:initial.percentile || {low:0,high:100}, latency:null, metric:initial.metric || 'wall', search:'' };
+  const state = { functionId:initial.function_id, threads:new Set(initial.threads || allThreadIds), time:{from_ns:clampTime(initialTime.from_ns),to_ns:clampTime(initialTime.to_ns)}, percentile:initial.percentile || {low:0,high:100}, latency:null, histogramBucketSizeNs:null, metric:initial.metric || 'wall', search:'' };
   if (state.time.from_ns >= state.time.to_ns) { state.time.from_ns=bounds.from; state.time.to_ns=bounds.to; }
   let zoomPath = [];
   let drag = null;
@@ -196,7 +196,7 @@ const JAVASCRIPT: &str = r##"
     svg.onwheel=event=>{ const value=timelineValue(event,svg,width,0,chartWidth), chartRect=chartScroll.getBoundingClientRect(), pointerX=event.clientX-chartRect.left, nextScale=Math.max(1,Math.min(8,timelineScale*Math.exp(-event.deltaY*0.002))); if(value<state.time.from_ns||value>state.time.to_ns||nextScale===timelineScale) return; event.preventDefault(); timelineScale=nextScale; render(); const nextWidth=Math.max(240,chartScroll.clientWidth*timelineScale); chartScroll.scrollLeft=Math.max(0,position(value)*nextWidth-pointerX); };
     chartScroll.onscroll=()=>{if(labelScroll.scrollTop!==chartScroll.scrollTop) labelScroll.scrollTop=chartScroll.scrollTop;}; labelScroll.onscroll=()=>{if(chartScroll.scrollTop!==labelScroll.scrollTop) chartScroll.scrollTop=labelScroll.scrollTop;}; labelScroll.scrollTop=chartScroll.scrollTop;
   }
-  function paintHistogram(result) {
+  function paintHistogramSuperseded(result) {
     const all=result.all, svg=id('histogram'), width=720, height=126, bins=30; svg.innerHTML=''; if(!all.length) return; const durations=all.map(invocation=>invocation.end_ns-invocation.start_ns), min=Math.min(...durations), max=Math.max(...durations), span=Math.max(1,max-min), counts=Array(bins).fill(0), selected=Array(bins).fill(false), [start,end]=rankBounds(all.length,state.percentile); all.forEach((invocation,index)=>{const bucket=Math.min(bins-1,Math.floor((invocation.end_ns-invocation.start_ns-min)/span*bins)); counts[bucket]++; if(index>=start&&index<end) selected[bucket]=true;}); const peak=Math.max(1,...counts); counts.forEach((value,index)=>{const x=index*width/bins, h=value/peak*92, rect=svgEl('rect',{class:selected[index]?'hist-selected':'hist-bar',x:x+1,y:98-h,width:width/bins-2,height:h,rx:2}); svg.appendChild(rect);}); const xFor=value=>Math.max(0,Math.min(width,(value-min)/span*width)), lowValue=result.low ?? min, highValue=result.high ?? max, lowX=xFor(lowValue), highX=xFor(highValue); svg.appendChild(svgEl('rect',{class:'hist-window',x:lowX,y:0,width:Math.max(2,highX-lowX),height:103})); const label=(text,x)=>{const node=svgEl('text',{class:'hist-label',x,y:119}); node.textContent=text; svg.appendChild(node);}; label(ns(min),0); label(ns(max),width-66); const line=(x,text,edge)=>{const node=svgEl('line',{class:'hist-handle',x1:x,x2:x,y1:0,y2:102,'data-edge':edge}), hit=svgEl('rect',{class:'hist-handle-hit',x:x-8,y:0,width:16,height:103}); node.style.pointerEvents='none'; hit.addEventListener('pointerdown',event=>{event.stopPropagation(); drag={kind:`latency-${edge}`,edge,pointerId:event.pointerId,startX:event.clientX,low:state.latency.low_ns,high:state.latency.high_ns,startDuration:percentileValue(event,svg,width,min,max)}; svg.setPointerCapture(event.pointerId); event.preventDefault();}); svg.appendChild(node); svg.appendChild(hit);}; line(lowX,`p${state.percentile.low}`,'low'); line(highX,`p${state.percentile.high}`,'high'); svg.onpointerdown=event=>{if(event.target.tagName!=='text') {drag={kind:'latency-move',pointerId:event.pointerId,startX:event.clientX,low:state.latency.low_ns,high:state.latency.high_ns,startDuration:percentileValue(event,svg,width,min,max)}; svg.setPointerCapture(event.pointerId); event.preventDefault();}}; svg.onpointermove=event=>{if(!drag||drag.pointerId!==event.pointerId||!drag.kind.startsWith('latency-')) return; const next=percentileValue(event,svg,width,min,max); if(drag.kind==='latency-low') state.latency.low_ns=Math.min(next,state.latency.high_ns); else if(drag.kind==='latency-high') state.latency.high_ns=Math.max(next,state.latency.low_ns); else {const shift=Math.max(min-drag.low,Math.min(max-drag.high,next-drag.startDuration)); state.latency.low_ns=drag.low+shift; state.latency.high_ns=drag.high+shift;} render();}; svg.onpointerup=event=>{if(drag&&drag.pointerId===event.pointerId){drag=null;svg.releasePointerCapture(event.pointerId);}}; svg.onpointercancel=svg.onpointerup;
   }
   */
@@ -213,10 +213,147 @@ const JAVASCRIPT: &str = r##"
     svg.onpointerdown=event=>{const classes=event.target.classList;if(classes.contains('time-handle-hit'))return;const rect=svg.getBoundingClientRect(),inAxis=event.clientY-rect.top<axis;begin(inAxis?'time-move':'time-select',event);}; svg.onpointermove=event=>{if(!drag||drag.pointerId!==event.pointerId)return;const value=timelineValue(event,svg,width,0,chartWidth);if(drag.kind==='time-from')state.time.from_ns=Math.min(value,state.time.to_ns-1);else if(drag.kind==='time-to')state.time.to_ns=Math.max(value,state.time.from_ns+1);else if(drag.kind==='time-move'){const delta=value-drag.startValue,shift=Math.max(bounds.from-drag.from,Math.min(bounds.to-drag.to,delta));state.time.from_ns=drag.from+shift;state.time.to_ns=drag.to+shift;}else{state.time.from_ns=Math.min(drag.startValue,value);state.time.to_ns=Math.max(drag.startValue,value);if(state.time.from_ns===state.time.to_ns)state.time.to_ns=Math.min(bounds.to,state.time.from_ns+1);}updateWindow();}; svg.onpointerup=event=>{if(drag&&drag.pointerId===event.pointerId){drag=null;svg.releasePointerCapture(event.pointerId);render();}};svg.onpointercancel=svg.onpointerup;
     svg.onwheel=event=>{const value=timelineValue(event,svg,width,0,chartWidth),chartRect=chartScroll.getBoundingClientRect(),pointerX=event.clientX-chartRect.left,nextScale=Math.max(1,Math.min(8,timelineScale*Math.exp(-event.deltaY*0.002)));if(value<state.time.from_ns||value>state.time.to_ns||nextScale===timelineScale)return;event.preventDefault();timelineScale=nextScale;render();const nextWidth=Math.max(240,chartScroll.clientWidth*timelineScale);chartScroll.scrollLeft=Math.max(0,position(value)*nextWidth-pointerX);}; chartScroll.onscroll=()=>{if(labelScroll.scrollTop!==chartScroll.scrollTop)labelScroll.scrollTop=chartScroll.scrollTop;};labelScroll.onscroll=()=>{if(chartScroll.scrollTop!==labelScroll.scrollTop)chartScroll.scrollTop=labelScroll.scrollTop;};labelScroll.scrollTop=chartScroll.scrollTop;
   }
-  function paintHistogram(result) {
+  function paintHistogramLegacy(result) {
     const all=result.all,svg=id('histogram'),width=Math.max(480,svg.clientWidth||720),height=126,bins=30,railHeight=20;svg.innerHTML='';svg.setAttribute('viewBox',`0 0 ${width} ${height}`);histogramView=null;if(!all.length)return;const durations=result.durations||all.map(invocation=>invocation.end_ns-invocation.start_ns),min=Math.min(...durations),max=Math.max(...durations),span=Math.max(1,max-min),counts=Array(bins).fill(0),bucketByIndex=[];durations.forEach((duration,index)=>{const bucket=Math.min(bins-1,Math.floor((duration-min)/span*bins));counts[bucket]++;bucketByIndex[index]=bucket;});const peak=Math.max(1,...counts),rail=svgEl('rect',{class:'histogram-rail',x:0,y:0,width,height:railHeight}),bars=[];svg.appendChild(rail);counts.forEach((value,index)=>{const x=index*width/bins,h=value/peak*76,bar=svgEl('rect',{class:'hist-bar',x:x+1,y:98-h,width:width/bins-2,height:h,rx:2});bars.push(bar);svg.appendChild(bar);});const xFor=value=>Math.max(0,Math.min(width,(value-min)/span*width)),railSelection=svgEl('rect',{class:'histogram-rail-selection',x:0,y:0,width:2,height:railHeight}),windowRect=svgEl('rect',{class:'hist-window',x:0,y:railHeight,width:2,height:103-railHeight}),lowLine=svgEl('line',{class:'hist-handle','data-edge':'low',y1:0,y2:102}),highLine=svgEl('line',{class:'hist-handle','data-edge':'high',y1:0,y2:102}),lowHit=svgEl('rect',{class:'hist-handle-hit','data-edge':'low',y:0,width:16,height:103}),highHit=svgEl('rect',{class:'hist-handle-hit','data-edge':'high',y:0,width:16,height:103});svg.appendChild(windowRect);svg.appendChild(railSelection);svg.appendChild(lowLine);svg.appendChild(highLine);svg.appendChild(lowHit);svg.appendChild(highHit);const label=(text,x,anchor='middle')=>{const node=svgEl('text',{class:'hist-label',x,y:119,'text-anchor':anchor});node.textContent=text;svg.appendChild(node);};const niceStep=span=>{const raw=span/5,power=10**Math.floor(Math.log10(raw)),scaled=raw/power,factor=scaled>=5?5:scaled>=2?2:1;return factor*power;};const ticks=[min],step=niceStep(span);for(let value=Math.ceil(min/step)*step;value<max;value+=step){if(value>min)ticks.push(value);}ticks.push(max);ticks.forEach((value,index)=>{const x=xFor(value);svg.appendChild(svgEl('line',{class:'hist-axis-tick',x1:x,x2:x,y1:102,y2:108}));label(ns(value),x,index===0?'start':index===ticks.length-1?'end':'middle');});
     const valueAt=(event,rect)=>min+Math.max(0,Math.min(1,(event.clientX-rect.left)/rect.width))*span; const update=()=>{const low=state.latency.low_ns,high=state.latency.high_ns,lowX=xFor(low),highX=xFor(high),range=rankBounds(all.length,state.percentile),selected=Array(bins).fill(false);for(let index=range[0];index<range[1];index++)selected[bucketByIndex[index]]=true;bars.forEach((bar,index)=>bar.setAttribute('class',selected[index]?'hist-selected':'hist-bar'));windowRect.setAttribute('x',lowX);windowRect.setAttribute('width',Math.max(2,highX-lowX));railSelection.setAttribute('x',lowX);railSelection.setAttribute('width',Math.max(2,highX-lowX));lowLine.setAttribute('x1',lowX);lowLine.setAttribute('x2',lowX);highLine.setAttribute('x1',highX);highLine.setAttribute('x2',highX);lowHit.setAttribute('x',lowX-8);highHit.setAttribute('x',highX-8);id('pct-low').value=state.percentile.low;id('pct-high').value=state.percentile.high;};histogramView={all,durations,min,max,span,svg,width,update};
     const begin=(kind,event)=>{const rect=svg.getBoundingClientRect(),next=valueAt(event,rect),edgeValue=kind==='low'?state.latency.low_ns:state.latency.high_ns;drag={kind:kind==='move'?'latency-move':kind==='select'?'latency-select':`latency-${kind}`,edge:kind,pointerId:event.pointerId,rect,startDuration:next,low:state.latency.low_ns,high:state.latency.high_ns,offset:next-state.latency.low_ns,edgeOffset:next-edgeValue};svg.setPointerCapture(event.pointerId);event.preventDefault();};lowHit.addEventListener('pointerdown',event=>{event.stopPropagation();begin('low',event);});highHit.addEventListener('pointerdown',event=>{event.stopPropagation();begin('high',event);});svg.onpointerdown=event=>{const rect=svg.getBoundingClientRect(),inRail=event.clientY-rect.top<railHeight;if(event.target.tagName!=='text'&&!event.target.classList.contains('hist-handle-hit'))begin(inRail?'move':'select',event);};svg.onpointermove=event=>{if(!drag||drag.pointerId!==event.pointerId||!drag.kind.startsWith('latency-'))return;const next=valueAt(event,drag.rect);if(drag.kind==='latency-low')state.latency.low_ns=Math.min(next-drag.edgeOffset,state.latency.high_ns);else if(drag.kind==='latency-high')state.latency.high_ns=Math.max(next-drag.edgeOffset,state.latency.low_ns);else if(drag.kind==='latency-move'){const size=drag.high-drag.low,low=Math.max(min,Math.min(max-size,next-drag.offset));state.latency.low_ns=low;state.latency.high_ns=low+size;}else{const low=Math.min(drag.startDuration,next),high=Math.max(drag.startDuration,next);state.latency.low_ns=low;state.latency.high_ns=high>low?high:Math.min(max,low+1);}syncLatencyWindow(durations);histogramView.update();};svg.onpointerup=event=>{if(drag&&drag.pointerId===event.pointerId){drag=null;svg.releasePointerCapture(event.pointerId);render();}};svg.onpointercancel=svg.onpointerup;update();
+  }
+  function paintHistogram(result) {
+    const all = result.all;
+    const svg = id('histogram');
+    const width = Math.max(480, svg.clientWidth || 720);
+    const height = 126;
+    const railHeight = 20;
+    svg.innerHTML = '';
+    svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+    histogramView = null;
+    if (!all.length) return;
+
+    const durations = result.durations || all.map(invocation => invocation.end_ns - invocation.start_ns);
+    const rawMin = Math.min(...durations);
+    const rawMax = Math.max(...durations);
+    const bucketSize = state.histogramBucketSizeNs;
+    const min = bucketSize ? Math.floor(rawMin / bucketSize) * bucketSize : rawMin;
+    const bins = bucketSize ? Math.max(1, Math.ceil((rawMax - min) / bucketSize)) : 30;
+    const max = bucketSize ? min + bins * bucketSize : rawMax;
+    const span = Math.max(1, max - min);
+    const counts = Array(bins).fill(0);
+    const bucketByIndex = [];
+    durations.forEach((duration, index) => {
+      const bucket = Math.min(bins - 1, Math.floor((duration - min) / span * bins));
+      counts[bucket]++;
+      bucketByIndex[index] = bucket;
+    });
+    const peak = Math.max(1, ...counts);
+    const rail = svgEl('rect', { class: 'histogram-rail', x: 0, y: 0, width, height: railHeight });
+    const bars = [];
+    svg.appendChild(rail);
+    counts.forEach((value, index) => {
+      const x = index * width / bins;
+      const h = value / peak * 76;
+      const bar = svgEl('rect', { class: 'hist-bar', x: x + 1, y: 98 - h, width: width / bins - 2, height: h, rx: 2 });
+      bars.push(bar);
+      svg.appendChild(bar);
+    });
+    const xFor = value => Math.max(0, Math.min(width, (value - min) / span * width));
+    const railSelection = svgEl('rect', { class: 'histogram-rail-selection', x: 0, y: 0, width: 2, height: railHeight });
+    const windowRect = svgEl('rect', { class: 'hist-window', x: 0, y: railHeight, width: 2, height: 103 - railHeight });
+    const lowLine = svgEl('line', { class: 'hist-handle', 'data-edge': 'low', y1: 0, y2: 102 });
+    const highLine = svgEl('line', { class: 'hist-handle', 'data-edge': 'high', y1: 0, y2: 102 });
+    const lowHit = svgEl('rect', { class: 'hist-handle-hit', 'data-edge': 'low', y: 0, width: 16, height: 103 });
+    const highHit = svgEl('rect', { class: 'hist-handle-hit', 'data-edge': 'high', y: 0, width: 16, height: 103 });
+    svg.appendChild(windowRect);
+    svg.appendChild(railSelection);
+    svg.appendChild(lowLine);
+    svg.appendChild(highLine);
+    svg.appendChild(lowHit);
+    svg.appendChild(highHit);
+
+    const label = (text, x, anchor = 'middle') => {
+      const node = svgEl('text', { class: 'hist-label', x, y: 119, 'text-anchor': anchor });
+      node.textContent = text;
+      svg.appendChild(node);
+    };
+    const niceStep = value => {
+      const raw = value / 5;
+      const power = 10 ** Math.floor(Math.log10(raw));
+      const scaled = raw / power;
+      return (scaled >= 5 ? 5 : scaled >= 2 ? 2 : 1) * power;
+    };
+    const ticks = [min];
+    const step = niceStep(span);
+    for (let value = Math.ceil(min / step) * step; value < max; value += step) {
+      if (value > min) ticks.push(value);
+    }
+    ticks.push(max);
+    ticks.forEach((value, index) => {
+      const x = xFor(value);
+      svg.appendChild(svgEl('line', { class: 'hist-axis-tick', x1: x, x2: x, y1: 102, y2: 108 }));
+      label(ns(value), x, index === 0 ? 'start' : index === ticks.length - 1 ? 'end' : 'middle');
+    });
+
+    const valueAt = (event, rect) => min + Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)) * span;
+    const update = () => {
+      const low = state.latency.low_ns;
+      const high = state.latency.high_ns;
+      const lowX = xFor(low);
+      const highX = xFor(high);
+      const range = rankBounds(all.length, state.percentile);
+      const selected = Array(bins).fill(false);
+      for (let index = range[0]; index < range[1]; index++) selected[bucketByIndex[index]] = true;
+      bars.forEach((bar, index) => bar.setAttribute('class', selected[index] ? 'hist-selected' : 'hist-bar'));
+      windowRect.setAttribute('x', lowX);
+      windowRect.setAttribute('width', Math.max(2, highX - lowX));
+      railSelection.setAttribute('x', lowX);
+      railSelection.setAttribute('width', Math.max(2, highX - lowX));
+      lowLine.setAttribute('x1', lowX);
+      lowLine.setAttribute('x2', lowX);
+      highLine.setAttribute('x1', highX);
+      highLine.setAttribute('x2', highX);
+      lowHit.setAttribute('x', lowX - 8);
+      highHit.setAttribute('x', highX - 8);
+      id('pct-low').value = state.percentile.low;
+      id('pct-high').value = state.percentile.high;
+    };
+    histogramView = { all, durations, min, max, span, svg, width, update };
+
+    const begin = (kind, event) => {
+      const rect = svg.getBoundingClientRect();
+      const next = valueAt(event, rect);
+      const edgeValue = kind === 'low' ? state.latency.low_ns : state.latency.high_ns;
+      drag = { kind: kind === 'move' ? 'latency-move' : kind === 'select' ? 'latency-select' : `latency-${kind}`, edge: kind, pointerId: event.pointerId, rect, startDuration: next, low: state.latency.low_ns, high: state.latency.high_ns, offset: next - state.latency.low_ns, edgeOffset: next - edgeValue };
+      svg.setPointerCapture(event.pointerId);
+      event.preventDefault();
+    };
+    lowHit.addEventListener('pointerdown', event => { event.stopPropagation(); begin('low', event); });
+    highHit.addEventListener('pointerdown', event => { event.stopPropagation(); begin('high', event); });
+    svg.onpointerdown = event => {
+      const rect = svg.getBoundingClientRect();
+      const inRail = event.clientY - rect.top < railHeight;
+      if (event.target.tagName !== 'text' && !event.target.classList.contains('hist-handle-hit')) begin(inRail ? 'move' : 'select', event);
+    };
+    svg.onpointermove = event => {
+      if (!drag || drag.pointerId !== event.pointerId || !drag.kind.startsWith('latency-')) return;
+      const next = valueAt(event, drag.rect);
+      if (drag.kind === 'latency-low') state.latency.low_ns = Math.min(next - drag.edgeOffset, state.latency.high_ns);
+      else if (drag.kind === 'latency-high') state.latency.high_ns = Math.max(next - drag.edgeOffset, state.latency.low_ns);
+      else if (drag.kind === 'latency-move') {
+        const size = drag.high - drag.low;
+        const low = Math.max(min, Math.min(max - size, next - drag.offset));
+        state.latency.low_ns = low;
+        state.latency.high_ns = low + size;
+      } else {
+        const low = Math.min(drag.startDuration, next);
+        const high = Math.max(drag.startDuration, next);
+        state.latency.low_ns = low;
+        state.latency.high_ns = high > low ? high : Math.min(max, low + 1);
+      }
+      syncLatencyWindow(durations);
+      histogramView.update();
+    };
+    svg.onpointerup = event => { if (drag && drag.pointerId === event.pointerId) { drag = null; svg.releasePointerCapture(event.pointerId); render(); } };
+    svg.onpointercancel = svg.onpointerup;
+    update();
   }
   function flameColor(name) { let hash=0; for(let index=0;index<name.length;index++) hash=(hash*33+name.charCodeAt(index))>>>0; return `hsl(${20+hash%46} ${64+hash%19}% ${48+hash%17}%)`; }
   const nodeAtPath=(root,path)=>path.reduce((current,name)=>current && current.children.get(name),root);
@@ -237,7 +374,7 @@ const JAVASCRIPT: &str = r##"
     const threads=id('threads'); threadRows.forEach(thread=>{const label=document.createElement('label'), input=document.createElement('input'); input.type='checkbox'; input.value=thread.tid; input.checked=state.threads.has(thread.tid); const text=document.createTextNode(`${thread.name || 'TID'} ${thread.tid}`); label.append(input,text); threads.appendChild(label);}); threads.addEventListener('change',event=>{if(event.target.matches('input')){const tid=Number(event.target.value); event.target.checked?state.threads.add(tid):state.threads.delete(tid); render();}});
     const commitTime=(element,key)=>{const entered=Number(element.value); if(!Number.isFinite(entered)) return render(); const value=clampTime(bounds.from+entered*1e6); if(key==='from_ns') state.time.from_ns=Math.min(value,state.time.to_ns-1); else state.time.to_ns=Math.max(value,state.time.from_ns+1); render();}; id('time-low').addEventListener('change',event=>commitTime(event.target,'from_ns')); id('time-high').addEventListener('change',event=>commitTime(event.target,'to_ns'));
     const commitPercentile=(element,key)=>{const entered=Number(element.value), durations=eligible().map(invocation=>invocation.end_ns-invocation.start_ns); if(!Number.isFinite(entered)||!durations.length) return render(); const next=key==='low'?clampPercentileWindow(entered,state.percentile.high):clampPercentileWindow(state.percentile.low,entered); state.percentile=next; state.latency={low_ns:durationAtPercentile(durations,next.low),high_ns:durationAtPercentile(durations,next.high)}; render();}; id('pct-low').addEventListener('change',event=>commitPercentile(event.target,'low')); id('pct-high').addEventListener('change',event=>commitPercentile(event.target,'high'));
-    id('metric').value=state.metric; id('metric').addEventListener('change',event=>{state.metric=event.target.value; render();}); id('frame-search').addEventListener('input',event=>{state.search=event.target.value.trim().toLowerCase(); renderFlame(calculate().root);});
+    id('histogram-bucket-size').value=state.histogramBucketSizeNs ?? 'auto'; id('histogram-bucket-size').addEventListener('change',event=>{state.histogramBucketSizeNs=event.target.value==='auto'?null:Number(event.target.value); render();}); id('metric').value=state.metric; id('metric').addEventListener('change',event=>{state.metric=event.target.value; render();}); id('frame-search').addEventListener('input',event=>{state.search=event.target.value.trim().toLowerCase(); renderFlame(calculate().root);});
   }
   bind(); render(); decorateFlame(); decorateTimeline(); window.addEventListener('resize',()=>render());
   } catch (error) {
@@ -302,6 +439,9 @@ mod tests {
         assert!(html.contains("startDuration"));
         assert!(html.contains("syncLatencyWindow(durations)"));
         assert!(html.contains("histogramView.update()"));
+        assert!(html.contains("histogram-bucket-size"));
+        assert!(html.contains("histogramBucketSizeNs"));
+        assert!(html.contains("const bucketSize = state.histogramBucketSizeNs"));
         assert!(html.contains("startValue:timelineValue"));
         assert!(html.contains("drag.rect"));
         assert!(!html.contains("startPercentile"));

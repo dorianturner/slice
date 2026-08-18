@@ -139,6 +139,13 @@ assert(selectedFrom > 0 && selectedTo < initialCaptureEnd, 'timeline drag should
 assert(selectedFrom < selectedTo, 'timeline drag should preserve ordered time bounds');
 
 const histogram = elements.get('histogram');
+const bucketSize = elements.get('histogram-bucket-size');
+assert(bucketSize.value === 'auto', 'histogram should default to automatic bucket sizing');
+const automaticBucketCount = histogram.querySelectorAll('.hist-bar').length;
+bucketSize.value = '1000000';
+bucketSize.dispatchEvent({ type: 'change', target: bucketSize });
+const fixedBucketCount = histogram.querySelectorAll('.hist-bar').length;
+assert(fixedBucketCount !== automaticBucketCount, 'histogram bucket size should change the bin count');
 const initialHistogramWindow = histogram.querySelector('.hist-window');
 const initialHistogramX = Number(initialHistogramWindow.getAttribute('x'));
 histogram.dispatchEvent({ type: 'pointerdown', pointerId: 8, clientX: 150, clientY: 70, preventDefault() {} });

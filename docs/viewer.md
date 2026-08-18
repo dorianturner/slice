@@ -14,6 +14,9 @@ server or network access.
   existing window while preserving its width.
 - Histogram body drags create a latency window. Its upper rail moves the current
   window, and the percentile fields provide exact percentile controls.
+- The histogram Bucket control defaults to Auto. Fixed choices use the selected
+  time width, align the histogram bounds to that width, and redraw the bins
+  without changing the selected invocation population.
 - The 0:100 percentile range includes every valid invocation. A narrower range
   is intentionally a population filter.
 
