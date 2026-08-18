@@ -4,7 +4,10 @@
 //! can be opened directly from `file://` without a server or network access.
 
 use serde::Serialize;
-use slice_core::{Metric, PercentileRange, Profile, Query, TimeRange};
+use slice_core::{
+    Metric, PercentileRange, Profile, ProfileValidationError, Query, QueryError, TimeRange,
+    execute_query,
+};
 
 #[derive(Clone, Debug, Serialize)]
 struct InitialQuery {
@@ -30,8 +33,20 @@ impl From<&Query> for InitialQuery {
     }
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum RenderError {
+    #[error("invalid profile: {0}")]
+    InvalidProfile(#[from] ProfileValidationError),
+    #[error("invalid viewer query: {0}")]
+    InvalidQuery(#[from] QueryError),
+    #[error("viewer serialization error: {0}")]
+    Serialization(#[from] serde_json::Error),
+}
+
 /// Return a complete offline HTML viewer.
-pub fn render_html(profile: &Profile, query: &Query) -> Result<String, serde_json::Error> {
+pub fn render_html(profile: &Profile, query: &Query) -> Result<String, RenderError> {
+    profile.validate()?;
+    execute_query(profile, query)?;
     let profile_json = script_safe_json(profile)?;
     let initial_json = script_safe_json(&InitialQuery::from(query))?;
     Ok(format!(
@@ -49,6 +64,8 @@ pub fn render_html(profile: &Profile, query: &Query) -> Result<String, serde_jso
     <div><p class="eyebrow">PERCENTILE-CONDITIONED PROFILE</p><h1>Slice</h1><p class="muted">Firefox Profiler-inspired execution explorer</p></div>
     <div id="quality" class="quality" aria-live="polite"></div>
   </header>
+  <noscript><div class="viewer-error" role="alert">This offline report needs JavaScript enabled to render its interactive controls.</div></noscript>
+  <div id="viewer-error" class="viewer-error" role="alert" hidden></div>
   <section class="population" aria-label="Population">
     <div><p class="label">Population</p><h2 id="population-name"></h2><p id="population-detail" class="muted"></p></div>
     <div class="capture-meta"><span id="capture-command"></span><span id="capture-range"></span></div>
@@ -73,19 +90,18 @@ pub fn render_html(profile: &Profile, query: &Query) -> Result<String, serde_jso
     ))
 }
 
-fn script_safe_json(value: &impl Serialize) -> Result<String, serde_json::Error> {
-    serde_json::to_string(value).map(|json| {
-        json.replace('&', "\\u0026")
-            .replace('<', "\\u003c")
-            .replace('>', "\\u003e")
-    })
+fn script_safe_json(value: &impl Serialize) -> Result<String, RenderError> {
+    Ok(serde_json::to_string(value)?
+        .replace('&', "\\u0026")
+        .replace('<', "\\u003c")
+        .replace('>', "\\u003e"))
 }
 
 const CSS: &str = r##"
 :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; background:#101218; color:#edf0f6; }
 * { box-sizing:border-box; } body { margin:0; background:radial-gradient(circle at 10% -20%,#293448 0,#101218 43%); } main { max-width:1440px; margin:auto; padding:28px clamp(16px,4vw,52px) 72px; }
 h1,h2,p { margin:0; } h1 { font-size:2.4rem; letter-spacing:-.05em; } h2 { font-size:1.12rem; letter-spacing:-.01em; } .eyebrow,.label { color:#96a5bc; font-size:.7rem; font-weight:800; letter-spacing:.13em; } .muted { color:#aeb8ca; font-size:.83rem; }
-.topbar { display:flex; align-items:end; justify-content:space-between; border-bottom:1px solid #2b3240; padding-bottom:19px; } .topbar .muted { margin-top:4px; } .quality { color:#b8f4c8; font-size:.8rem; text-align:right; max-width:440px; }
+.topbar { display:flex; align-items:end; justify-content:space-between; border-bottom:1px solid #2b3240; padding-bottom:19px; } .topbar .muted { margin-top:4px; } .quality { color:#b8f4c8; font-size:.8rem; text-align:right; max-width:440px; } .viewer-error { margin:14px 0; padding:10px 12px; border:1px solid #a86a55; border-radius:7px; background:#3a211d; color:#ffd4c5; font-size:.82rem; }
 .population { display:flex; justify-content:space-between; gap:18px; padding:25px 0 17px; } .population h2 { margin-top:6px; font-size:1.35rem; } .population .muted { margin-top:5px; } .capture-meta { display:flex; flex-direction:column; gap:5px; color:#8fa0bb; font-size:.75rem; text-align:right; font-variant-numeric:tabular-nums; }
 .timeline-section,.flame-section { border:1px solid #2d3441; border-radius:12px; background:#161a22; padding:18px; } .timeline-section { margin-bottom:13px; } .section-heading { display:flex; justify-content:space-between; align-items:center; gap:14px; margin-bottom:7px; } .timeline-actions { display:flex; align-items:center; justify-content:flex-end; gap:12px; min-width:0; } .value { color:#8ac5ff; font-variant-numeric:tabular-nums; } .timeline-scroll { height:280px; max-width:100%; display:grid; grid-template-columns:170px minmax(0,1fr); overflow:hidden; margin-top:12px; background:#0f131a; border-radius:7px; overscroll-behavior:contain; } .timeline-labels-scroll,.timeline-chart-scroll { min-width:0; min-height:0; overflow-y:auto; overflow-x:hidden; scrollbar-width:none; } .timeline-labels-scroll::-webkit-scrollbar { width:0; height:0; } .timeline-chart-scroll { overflow:auto; } #timeline-labels,#timeline { display:block; background:#0f131a; } #timeline-labels { width:170px; } #timeline { min-height:120px; touch-action:none; } .timeline-bg { fill:#121821; } .timeline-lane { fill:#18202c; } .timeline-selection { fill:#3b78aa; opacity:.18; pointer-events:none; } .timeline-invocation { fill:#536c8e; opacity:.74; cursor:pointer; } .timeline-invocation.selected { fill:#82c4ff; opacity:.95; } .timeline-invocation:hover { stroke:#fff; stroke-width:1.5; } .timeline-sample { fill:#9fc8ee; opacity:.25; pointer-events:none; } .timeline-text,.timeline-axis { fill:#aeb8ca; font-size:10px; dominant-baseline:middle; } .timeline-axis { font-size:9px; } .thread-label { cursor:pointer; } .thread-label.inactive { fill:#68758b; text-decoration:line-through; } .time-handle { pointer-events:none; } .time-handle-hit { fill:transparent; cursor:ew-resize; }
 .controls { display:grid; grid-template-columns:minmax(0,2.8fr) minmax(180px,1fr); gap:12px; margin:13px 0; } fieldset { min-width:0; margin:0; border:1px solid #2d3441; border-radius:10px; background:#161a22; padding:13px; } legend { display:flex; align-items:center; gap:10px; color:#c9d2e3; font-size:.8rem; padding:0 5px; white-space:nowrap; } input,select,button { accent-color:#68b7ff; } .range-editor { display:flex; align-items:center; gap:5px; color:#8ac5ff; font-variant-numeric:tabular-nums; white-space:nowrap; } .range-editor label { display:flex; align-items:center; gap:4px; color:#aeb8ca; font-size:.76rem; } .range-input { width:78px; background:#202735; color:#edf0f6; border:1px solid #46536a; border-radius:5px; padding:5px 6px; font:inherit; font-variant-numeric:tabular-nums; } .percentile-editor { display:inline-flex; gap:7px; margin-left:4px; font-size:.8rem; } .percentile-input { width:48px; text-align:center; padding:3px 2px; } select { width:100%; background:#232937; border:1px solid #4a566d; border-radius:5px; color:#edf0f6; padding:6px; } .thread-picker { position:relative; flex:0 1 auto; min-width:145px; } .thread-picker summary { cursor:pointer; list-style:none; border:1px solid #4a566d; border-radius:5px; background:#232937; color:#edf0f6; padding:6px 8px; font-size:.78rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; } .thread-picker summary::-webkit-details-marker { display:none; } .thread-picker[open] summary { border-radius:5px 5px 0 0; } .thread-list { position:absolute; z-index:3; left:0; right:0; display:grid; gap:4px; max-height:180px; overflow:auto; margin-top:0; padding:7px; border:1px solid #4a566d; border-top:0; border-radius:0 0 5px 5px; background:#232937; } .thread-list label { display:flex; gap:6px; align-items:center; padding:4px 5px; font-size:.74rem; white-space:nowrap; cursor:pointer; } .control-help { color:#9ca9bd; font-size:.74rem; margin-top:10px; line-height:1.35; }
@@ -100,6 +116,7 @@ h1,h2,p { margin:0; } h1 { font-size:2.4rem; letter-spacing:-.05em; } h2 { font-
 const JAVASCRIPT: &str = r##"
 (() => {
   'use strict';
+  try {
   const profile = JSON.parse(document.getElementById('slice-profile').textContent);
   const initial = JSON.parse(document.getElementById('slice-initial-query').textContent);
   const byStack = new Map(profile.stacks.map(stack => [stack.id, stack]));
@@ -162,6 +179,7 @@ const JAVASCRIPT: &str = r##"
     }
     return {all,chosen,selectedIds,root,selectedSampleCount,cpu,off,low:lowValue,high:highValue,rankStart:start,rankEnd:end,durations};
   }
+  /* Superseded interaction implementation retained only in source history.
   function paintTimeline(result) {
     const svg=id('timeline'), labels=id('timeline-labels'), labelScroll=id('timeline-labels-scroll'), chartScroll=id('timeline-chart-scroll'), viewportWidth=chartScroll.clientWidth||800, width=Math.max(240,viewportWidth*timelineScale), chartWidth=width, row=27, axis=24, height=Math.max(96,axis+threadRows.length*row+10); svg.innerHTML=''; labels.innerHTML=''; svg.style.width=`${width}px`; svg.style.height=`${height}px`; labels.style.height=`${height}px`; svg.setAttribute('viewBox',`0 0 ${width} ${height}`); labels.setAttribute('viewBox',`0 0 170 ${height}`); labels.appendChild(svgEl('rect',{class:'timeline-bg',x:0,y:0,width:170,height,rx:6})); svg.appendChild(svgEl('rect',{class:'timeline-bg',x:0,y:0,width,height,rx:6}));
     const selectionX=position(state.time.from_ns)*chartWidth, selectionWidth=Math.max(1,(position(state.time.to_ns)-position(state.time.from_ns))*chartWidth); svg.appendChild(svgEl('rect',{class:'timeline-selection',x:selectionX,y:0,width:selectionWidth,height}));
@@ -183,6 +201,7 @@ const JAVASCRIPT: &str = r##"
   function paintHistogram(result) {
     const all=result.all, svg=id('histogram'), width=720, height=126, bins=30; svg.innerHTML=''; if(!all.length) return; const durations=all.map(invocation=>invocation.end_ns-invocation.start_ns), min=Math.min(...durations), max=Math.max(...durations), span=Math.max(1,max-min), counts=Array(bins).fill(0), selected=Array(bins).fill(false), [start,end]=rankBounds(all.length,state.percentile); all.forEach((invocation,index)=>{const bucket=Math.min(bins-1,Math.floor((invocation.end_ns-invocation.start_ns-min)/span*bins)); counts[bucket]++; if(index>=start&&index<end) selected[bucket]=true;}); const peak=Math.max(1,...counts); counts.forEach((value,index)=>{const x=index*width/bins, h=value/peak*92, rect=svgEl('rect',{class:selected[index]?'hist-selected':'hist-bar',x:x+1,y:98-h,width:width/bins-2,height:h,rx:2}); svg.appendChild(rect);}); const xFor=value=>Math.max(0,Math.min(width,(value-min)/span*width)), lowValue=result.low ?? min, highValue=result.high ?? max, lowX=xFor(lowValue), highX=xFor(highValue); svg.appendChild(svgEl('rect',{class:'hist-window',x:lowX,y:0,width:Math.max(2,highX-lowX),height:103})); const label=(text,x)=>{const node=svgEl('text',{class:'hist-label',x,y:119}); node.textContent=text; svg.appendChild(node);}; label(ns(min),0); label(ns(max),width-66); const line=(x,text,edge)=>{const node=svgEl('line',{class:'hist-handle',x1:x,x2:x,y1:0,y2:102,'data-edge':edge}), hit=svgEl('rect',{class:'hist-handle-hit',x:x-8,y:0,width:16,height:103}); node.style.pointerEvents='none'; hit.addEventListener('pointerdown',event=>{event.stopPropagation(); drag={kind:`latency-${edge}`,edge,pointerId:event.pointerId,startX:event.clientX,low:state.latency.low_ns,high:state.latency.high_ns,startDuration:percentileValue(event,svg,width,min,max)}; svg.setPointerCapture(event.pointerId); event.preventDefault();}); svg.appendChild(node); svg.appendChild(hit);}; line(lowX,`p${state.percentile.low}`,'low'); line(highX,`p${state.percentile.high}`,'high'); svg.onpointerdown=event=>{if(event.target.tagName!=='text') {drag={kind:'latency-move',pointerId:event.pointerId,startX:event.clientX,low:state.latency.low_ns,high:state.latency.high_ns,startDuration:percentileValue(event,svg,width,min,max)}; svg.setPointerCapture(event.pointerId); event.preventDefault();}}; svg.onpointermove=event=>{if(!drag||drag.pointerId!==event.pointerId||!drag.kind.startsWith('latency-')) return; const next=percentileValue(event,svg,width,min,max); if(drag.kind==='latency-low') state.latency.low_ns=Math.min(next,state.latency.high_ns); else if(drag.kind==='latency-high') state.latency.high_ns=Math.max(next,state.latency.low_ns); else {const shift=Math.max(min-drag.low,Math.min(max-drag.high,next-drag.startDuration)); state.latency.low_ns=drag.low+shift; state.latency.high_ns=drag.high+shift;} render();}; svg.onpointerup=event=>{if(drag&&drag.pointerId===event.pointerId){drag=null;svg.releasePointerCapture(event.pointerId);}}; svg.onpointercancel=svg.onpointerup;
   }
+  */
   // Fast interaction paths. Dragging updates only the active SVG geometry;
   // the expensive population/flame aggregation is committed on pointerup.
   function paintTimeline(result) {
@@ -206,20 +225,34 @@ const JAVASCRIPT: &str = r##"
   function showTimelineTooltip(event,invocation) { const tooltip=id('flame-tooltip'); tooltip.innerHTML=`<strong>Invocation #${invocation.id}</strong><span>TID ${invocation.tid} · ${ns(invocation.end_ns-invocation.start_ns)} wall</span><span>Start ${ns(invocation.start_ns-bounds.from)} · End ${ns(invocation.end_ns-bounds.from)}</span>`; tooltip.hidden=false; tooltip.style.left=`${Math.min(window.innerWidth-350,event.clientX+14)}px`; tooltip.style.top=`${Math.min(window.innerHeight-145,event.clientY+14)}px`; }
   function hideTooltip() { id('flame-tooltip').hidden=true; }
   const nodeAtPath=(root,path)=>path.reduce((current,name)=>current && current.children.get(name),root);
+  /* Superseded flame layout implementation retained only in source history.
   function renderFlame(root) { const svg=id('flame'); svg.innerHTML=''; let source=nodeAtPath(root,zoomPath); if(!source){zoomPath=[]; source=root;} if(!root.value) { svg.hidden=true; return; } svg.hidden=false; const width=Math.max(480,svg.clientWidth||1000), row=25, items=[], basePath=zoomPath.slice(); const walk=(current,x,w,path,depth)=>{items.push({current,x,w,path,depth}); let cursor=x; [...current.children.values()].filter(child=>child.value>0).sort((a,b)=>b.value-a.value||a.name.localeCompare(b.name)).forEach(child=>{const childWidth=w*(child.value/current.value); walk(child,cursor,childWidth,path.concat(child.name),depth+1); cursor+=childWidth;});}; walk(source,0,width,basePath,0); const maxDepth=Math.max(...items.map(item=>item.depth)), height=Math.max(130,(maxDepth+1)*row+5); svg.setAttribute('viewBox',`0 0 ${width} ${height}`); items.forEach(item=>{ if(item.current===source && source.name==='root') return; const y=(maxDepth-item.depth)*row, group=svgEl('g'), match=state.search && item.current.name.toLowerCase().includes(state.search); const rect=svgEl('rect',{class:`frame${match?' match':''}`,x:item.x,y,width:Math.max(0,item.w),height:row-2,fill:flameColor(item.current.name),rx:2}); const title=svgEl('title'); title.textContent=`${item.current.name} — ${ns(item.current.value)}, ${item.current.sampleCount} samples`; group.appendChild(title); group.appendChild(rect); if(item.w>74){const label=svgEl('text',{class:'frame-label',x:item.x+5,y:y+(row-2)/2}); label.textContent=item.current.name.slice(0,Math.max(8,Math.floor(item.w/7))); group.appendChild(label);} rect.addEventListener('mouseenter',event=>showFrameTooltip(event,item.current)); rect.addEventListener('mouseleave',hideTooltip); rect.addEventListener('click',()=>{zoomPath=item.path; render();}); svg.appendChild(group); }); }
+  */
   function placeTooltip(event) { const tooltip=id('flame-tooltip'), margin=12, gap=14, box=tooltip.getBoundingClientRect(), maxLeft=Math.max(margin,window.innerWidth-box.width-margin), maxTop=Math.max(margin,window.innerHeight-box.height-margin); let left=event.clientX+gap, top=event.clientY+gap; if(left+box.width>window.innerWidth-margin) left=event.clientX-gap-box.width; if(top+box.height>window.innerHeight-margin) top=event.clientY-gap-box.height; tooltip.style.left=`${Math.max(margin,Math.min(maxLeft,left))}px`; tooltip.style.top=`${Math.max(margin,Math.min(maxTop,top))}px`; }
   function showFrameTooltip(event,current) { const tooltip=id('flame-tooltip'); tooltip.innerHTML=`<strong>${escapeHtml(current.name)}</strong><span>Inclusive: ${ns(current.value)} · Self: ${ns(current.selfValue)}</span><span>Samples: ${count(current.sampleCount)} · Invocations: ${count(current.invocations.size)}</span><span>CPU: ${ns(current.cpu)} · Off-CPU: ${ns(current.off)}</span>`; tooltip.hidden=false; placeTooltip(event); }
   function showTimelineTooltip(event,invocation) { const tooltip=id('flame-tooltip'); tooltip.innerHTML=`<strong>Invocation #${invocation.id}</strong><span>TID ${invocation.tid} · ${ns(invocation.end_ns-invocation.start_ns)} wall</span><span>Start ${ns(invocation.start_ns-bounds.from)} · End ${ns(invocation.end_ns-bounds.from)}</span>`; tooltip.hidden=false; placeTooltip(event); }
   function renderZoomPath() { const nav=id('flame-zoom-path'); if(!nav)return; nav.innerHTML=''; const add=(label,path,index)=>{if(index) {const separator=document.createElement('span');separator.className='flame-zoom-separator';separator.textContent='›';nav.appendChild(separator);} const button=document.createElement('button');button.type='button';button.textContent=label;button.title=label;if(index===zoomPath.length)button.setAttribute('aria-current','page');button.addEventListener('click',()=>{zoomPath=path;render();});nav.appendChild(button);}; add('All stacks',[],0); zoomPath.forEach((name,index)=>add(name,zoomPath.slice(0,index+1),index+1)); }
   function renderFlame(root) { const svg=id('flame'); svg.innerHTML=''; renderZoomPath(); let source=nodeAtPath(root,zoomPath); if(!source){zoomPath=[];source=root;renderZoomPath();} if(!root.value) { svg.hidden=true; return; } svg.hidden=false; const width=Math.max(480,svg.clientWidth||1000),row=25,items=[],walk=(current,x,w,path,depth)=>{items.push({current,x,w,path,depth});let cursor=x;[...current.children.values()].filter(child=>child.value>0).sort((a,b)=>b.value-a.value||a.name.localeCompare(b.name)).forEach(child=>{const childWidth=w*(child.value/current.value);walk(child,cursor,childWidth,path.concat(child.name),depth+1);cursor+=childWidth;});}; if(source.name==='root'){let cursor=0;[...source.children.values()].filter(child=>child.value>0).sort((a,b)=>b.value-a.value||a.name.localeCompare(b.name)).forEach(child=>{const childWidth=width*(child.value/source.value);walk(child,cursor,childWidth,[child.name],0);cursor+=childWidth;});}else walk(source,0,width,zoomPath,0); const maxDepth=Math.max(0,...items.map(item=>item.depth)),rowHeight=25,height=Math.max(160,(maxDepth+1)*rowHeight+12); svg.style.height=`${height}px`; svg.setAttribute('viewBox',`0 0 ${width} ${height}`); items.forEach(item=>{const y=(maxDepth-item.depth)*rowHeight,group=svgEl('g'),match=state.search&&item.current.name.toLowerCase().includes(state.search),rect=svgEl('rect',{class:`frame${match?' match':''}`,x:item.x,y,width:Math.max(0,item.w),height:rowHeight-2,fill:flameColor(item.current.name),rx:2});const title=svgEl('title');title.textContent=`${item.current.name} — ${ns(item.current.value)}, ${item.current.sampleCount} samples`;group.appendChild(title);group.appendChild(rect);if(item.w>74){const label=svgEl('text',{class:'frame-label',x:item.x+5,y:y+(rowHeight-2)/2});label.textContent=item.current.name.slice(0,Math.max(8,Math.floor(item.w/7)));group.appendChild(label);}rect.addEventListener('mouseenter',event=>showFrameTooltip(event,item.current));rect.addEventListener('mouseleave',hideTooltip);rect.addEventListener('click',()=>{zoomPath=item.path;render();});svg.appendChild(group);}); }
   function render() { const result=calculate(), fn=byFunction.get(state.functionId); id('population-name').textContent=fn ? fn.demangled_name : 'Unknown function'; id('population-detail').textContent=`${count(result.all.length)} valid invocations after thread/time filters`; id('capture-command').textContent=profile.metadata.command.length ? profile.metadata.command.join(' ') : 'unknown command'; id('capture-range').textContent=`capture ${ns(bounds.to-bounds.from)}`; id('selected-count').textContent=count(result.chosen.length); id('latency-range').textContent=result.chosen.length?`${ns(Math.min(...result.chosen.map(invocation=>invocation.end_ns-invocation.start_ns)))} – ${ns(Math.max(...result.chosen.map(invocation=>invocation.end_ns-invocation.start_ns)))}`:'no selected latency'; id('sample-count').textContent=count(result.selectedSampleCount); id('sample-period').textContent=`period ${ns(profile.metadata.sample_period_ns)}`; id('cpu-time').textContent=ns(result.cpu); id('offcpu-time').textContent=`off-CPU ${ns(result.off)}`; id('time-low').value=relativeMs(state.time.from_ns); id('time-high').value=relativeMs(state.time.to_ns); id('time-low').max=relativeMs(bounds.to); id('time-high').max=relativeMs(bounds.to); id('pct-low').value=state.percentile.low; id('pct-high').value=state.percentile.high; id('thread-summary').textContent=state.threads.size===allThreadIds.length?'All observed threads':state.threads.size?`${state.threads.size} of ${allThreadIds.length} threads`:'No threads selected'; id('threads').querySelectorAll('input').forEach(input=>{input.checked=state.threads.has(Number(input.value));}); id('empty').hidden=Boolean(result.root.value); paintTimeline(result); paintHistogram(result); renderFlame(result.root); }
+  function decorateFlame() { id('flame').querySelectorAll('.frame').forEach(frame=>{if(frame.getAttribute('data-slice-a11y'))return;const title=frame.querySelector('title'),label=title ? title.textContent : 'Flame graph frame';frame.setAttribute('tabindex','0');frame.setAttribute('role','button');frame.setAttribute('aria-label',label);frame.setAttribute('aria-keyshortcuts','Enter Space');frame.setAttribute('data-slice-a11y','true');frame.addEventListener('keydown',event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();frame.click();}});}); }
+  function decorateTimeline() { id('timeline').querySelectorAll('.timeline-invocation').forEach(bar=>{if(bar.getAttribute('data-slice-a11y'))return;bar.setAttribute('tabindex','0');bar.setAttribute('role','img');bar.setAttribute('aria-label','Invocation timeline bar; hover for timing details');bar.setAttribute('data-slice-a11y','true');}); }
+  const observers = [['flame',decorateFlame],['timeline',decorateTimeline]]; observers.forEach(([name,decorate])=>{if(typeof MutationObserver==='function'){new MutationObserver(decorate).observe(id(name),{childList:true});}});
+  function updateQuality() { const quality=profile.quality||{}, issues=[['incomplete invocations',quality.incomplete_invocations],['dropped events',quality.events_dropped],['dropped samples',quality.samples_dropped],['stack mismatches',quality.stack_mismatches],['async violations',quality.suspected_async_violations]].filter(([,value])=>value); const status=issues.length?`warnings: ${issues.map(([name,value])=>`${name} ${count(value)}`).join(', ')}`:'complete capture data'; id('quality').textContent=`Profile quality · ${status} · ${count(quality.samples_generated||0)} samples`; id('quality').title=issues.length?issues.map(([name,value])=>`${name}: ${count(value)}`).join(' · '):'No capture quality warnings'; }
   function bind() {
     const threads=id('threads'); threadRows.forEach(thread=>{const label=document.createElement('label'), input=document.createElement('input'); input.type='checkbox'; input.value=thread.tid; input.checked=state.threads.has(thread.tid); const text=document.createTextNode(`${thread.name || 'TID'} ${thread.tid}`); label.append(input,text); threads.appendChild(label);}); threads.addEventListener('change',event=>{if(event.target.matches('input')){const tid=Number(event.target.value); event.target.checked?state.threads.add(tid):state.threads.delete(tid); render();}});
     const commitTime=(element,key)=>{const entered=Number(element.value); if(!Number.isFinite(entered)) return render(); const value=clampTime(bounds.from+entered*1e6); if(key==='from_ns') state.time.from_ns=Math.min(value,state.time.to_ns-1); else state.time.to_ns=Math.max(value,state.time.from_ns+1); render();}; id('time-low').addEventListener('change',event=>commitTime(event.target,'from_ns')); id('time-high').addEventListener('change',event=>commitTime(event.target,'to_ns'));
     const commitPercentile=(element,key)=>{const entered=Number(element.value), durations=eligible().map(invocation=>invocation.end_ns-invocation.start_ns); if(!Number.isFinite(entered)||!durations.length) return render(); const next=key==='low'?clampPercentileWindow(entered,state.percentile.high):clampPercentileWindow(state.percentile.low,entered); state.percentile=next; state.latency={low_ns:durationAtPercentile(durations,next.low),high_ns:durationAtPercentile(durations,next.high)}; render();}; id('pct-low').addEventListener('change',event=>commitPercentile(event.target,'low')); id('pct-high').addEventListener('change',event=>commitPercentile(event.target,'high'));
     id('metric').value=state.metric; id('metric').addEventListener('change',event=>{state.metric=event.target.value; render();}); id('frame-search').addEventListener('input',event=>{state.search=event.target.value.trim().toLowerCase(); renderFlame(calculate().root);}); const quality=profile.quality||{}; const warning=quality.incomplete_invocations||quality.events_dropped||quality.samples_dropped||quality.stack_mismatches||quality.suspected_async_violations; id('quality').textContent=`Profile quality · ${warning?'warnings present':'complete capture data'} · ${count(quality.samples_generated||0)} samples`;
   }
-  bind(); render(); window.addEventListener('resize',()=>render());
+  bind(); render(); decorateFlame(); decorateTimeline(); updateQuality(); window.addEventListener('resize',()=>render());
+  } catch (error) {
+    const failure = document.getElementById('viewer-error');
+    if (failure) {
+      failure.hidden = false;
+      failure.textContent = `Viewer failed to load: ${error instanceof Error ? error.message : String(error)}`;
+    }
+    console.error('Slice viewer failed to load', error);
+  }
 })();
 "##;
 
@@ -248,6 +281,10 @@ mod tests {
         assert!(html.contains("id=\"timeline-labels-scroll\""));
         assert!(html.contains("id=\"timeline-chart-scroll\""));
         assert!(html.contains("id=\"flame-tooltip\""));
+        assert!(html.contains("id=\"viewer-error\""));
+        assert!(html.contains("new MutationObserver"));
+        assert!(html.contains("aria-keyshortcuts"));
+        assert!(html.contains("warnings:"));
         assert!(html.contains("Samples:"));
         assert!(html.contains("id=\"time-low\""));
         assert!(html.contains("id=\"pct-low\""));
@@ -294,5 +331,26 @@ mod tests {
         )
         .unwrap();
         assert!(html.contains("SliceFixture::slow_tail_b()"));
+    }
+
+    #[test]
+    fn renderer_rejects_invalid_profiles_before_creating_a_report() {
+        let mut profile = tail_divergence_profile();
+        profile.samples[0].stack_id = 999;
+        let error = render_html(
+            &profile,
+            &Query {
+                function_id: 1,
+                threads: None,
+                time: None,
+                percentile: PercentileRange { low: 95, high: 100 },
+                metric: Metric::Wall,
+            },
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            RenderError::InvalidProfile(ProfileValidationError::UnknownStack(999))
+        ));
     }
 }

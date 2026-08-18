@@ -12,6 +12,9 @@ test:
 test-native:
     bash tests/native-fixtures.sh
 
+test-viewer:
+    bash tests/viewer-smoke.sh
+
 test-bpf:
     bash tests/bpf-build.sh
 
@@ -21,4 +24,4 @@ test-live:
 policy:
     bash scripts/check-repository.sh
 
-check: policy format lint test test-bpf test-native
+check: policy format lint test test-bpf test-native test-viewer

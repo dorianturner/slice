@@ -53,6 +53,7 @@ impl Profile {
         if profile.format_version != 1 {
             return Err(ProfileError::UnsupportedVersion(profile.format_version));
         }
+        profile.validate()?;
         Ok(profile)
     }
 
@@ -79,6 +80,11 @@ impl Profile {
             "invocation",
         )?;
         let stack_ids = unique_u32_ids(self.stacks.iter().map(|stack| stack.id), "stack")?;
+        let parents = self
+            .invocations
+            .iter()
+            .map(|invocation| (invocation.id, invocation.parent_id))
+            .collect::<HashMap<_, _>>();
 
         for invocation in &self.invocations {
             if !function_ids.contains(&invocation.function_id) {
@@ -99,6 +105,16 @@ impl Profile {
                 if !invocation_ids.contains(&parent_id) {
                     return Err(ProfileValidationError::UnknownInvocation(parent_id));
                 }
+            }
+            let mut ancestry = BTreeSet::new();
+            let mut current = Some(invocation.id);
+            while let Some(id) = current {
+                if !ancestry.insert(id) {
+                    return Err(ProfileValidationError::CyclicInvocationParent(
+                        invocation.id,
+                    ));
+                }
+                current = parents.get(&id).copied().flatten();
             }
         }
 
@@ -863,6 +879,8 @@ pub enum ProfileValidationError {
     UnknownThread(u32),
     #[error("record references unknown invocation {0}")]
     UnknownInvocation(u64),
+    #[error("invocation {0} has a cyclic parent chain")]
+    CyclicInvocationParent(u64),
     #[error("sample references unknown stack {0}")]
     UnknownStack(u32),
     #[error("invocation {0} has an end before its start")]
@@ -891,6 +909,8 @@ pub enum ProfileError {
     Io(#[from] std::io::Error),
     #[error("profile serialization error: {0}")]
     Json(#[from] serde_json::Error),
+    #[error("invalid profile: {0}")]
+    InvalidProfile(#[from] ProfileValidationError),
 }
 
 #[derive(Debug, Error, Eq, PartialEq)]
@@ -1009,6 +1029,28 @@ mod tests {
         assert_eq!(
             profile.validate(),
             Err(ProfileValidationError::UnknownStack(999))
+        );
+    }
+
+    #[test]
+    fn profile_deserialization_rejects_invalid_semantic_graphs() {
+        let mut profile = tail_divergence_profile();
+        profile.samples[0].stack_id = 999;
+        let error = Profile::from_bytes(&profile.to_bytes().unwrap()).unwrap_err();
+        assert!(matches!(
+            error,
+            ProfileError::InvalidProfile(ProfileValidationError::UnknownStack(999))
+        ));
+    }
+
+    #[test]
+    fn profile_validation_rejects_cyclic_invocation_parents() {
+        let mut profile = tail_divergence_profile();
+        profile.invocations[0].parent_id = Some(profile.invocations[1].id);
+        profile.invocations[1].parent_id = Some(profile.invocations[0].id);
+        assert_eq!(
+            profile.validate(),
+            Err(ProfileValidationError::CyclicInvocationParent(1))
         );
     }
 

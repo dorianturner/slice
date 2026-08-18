@@ -15,3 +15,5 @@ jobs:
       - uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25
       - name: Build and test native fixtures
         run: nix develop --accept-flake-config -c just test-native
+      - name: Execute the offline viewer smoke test
+        run: nix develop --accept-flake-config -c just test-viewer
