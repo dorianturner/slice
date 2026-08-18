@@ -53,6 +53,11 @@ development shell. The hosted agent-review job uses
 `openai/codex-action`, but is temporarily manual-only and is not a merge gate
 until an `OPENAI_API_KEY` repository secret is approved and provisioned.
 
+PR descriptions for code, build, fixture, or test changes must include an
+`Architecture impact:` section and a `Test evidence:` section. Changes under
+the core, collector, eBPF, or workflow paths must also include a `Security or
+privilege impact:` section. These headings are validated by the policy gate.
+
 ## Local Codex completion hook
 
 The repository includes [`.codex/hooks.json`](../.codex/hooks.json), which
