@@ -11,7 +11,7 @@ reproducibility check, but the local test loop does not require it.
 | Rust | `just lint` / `just test` | Warnings and deterministic unit/integration behavior |
 | BPF | `just test-bpf` | Compile the kernel program with warnings as errors |
 | Native | `just test-native` | Build C++ fixtures and test ELF symbol discovery |
-| Viewer | `just test-viewer` | Execute a generated offline report against its DOM contract |
+| Viewer | `just test-viewer` and `cargo test -p slice-cli` | Execute the generated offline report and exercise tail, bimodal, and off-CPU scenarios through the CLI |
 | Nix | `nix flake check -L` | Reproducible package and declared flake checks |
 | Live capture | `just test-live` | Required only on the privileged ephemeral runner |
 
