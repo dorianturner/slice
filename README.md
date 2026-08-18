@@ -293,8 +293,9 @@ window instead of redrawing it.
 The histogram shows the selected invocation population and its latency
 percentile window. Drag across the histogram body to draw a latency range, drag
 the upper rail to move the existing range, and use the percentile fields for
-exact values. The generated report is self-contained and can be opened directly
-from the filesystem.
+exact values. The Bucket control in the histogram header switches between
+automatic binning and fixed widths from 0.25 ms through 5 ms. The generated
+report is self-contained and can be opened directly from the filesystem.
 
 The flame graph is built from sampled user stacks for the selected invocations
 and metric. It starts at the named population function and includes recorded
