@@ -879,6 +879,147 @@ pub fn bimodal_profile() -> Profile {
     }
 }
 
+/// A deterministic two-thread profile for comparing CPU, off-CPU, and wall
+/// metrics. Each invocation spends 2ms on CPU and the rest waiting, with
+/// alternating 20ms and 40ms wall durations like the native `off_cpu_wait`
+/// workload.
+pub fn off_cpu_profile() -> Profile {
+    let work = 1;
+    let cpu = 2;
+    let wait = 3;
+    let on_cpu_stack = 30;
+    let off_cpu_stack = 31;
+    let tids = [7201_u32, 7202_u32];
+    let mut invocations = Vec::new();
+    let mut samples = Vec::new();
+    let mut invocation_id = 1_u64;
+
+    for (thread_index, tid) in tids.into_iter().enumerate() {
+        let mut start_ns = thread_index as u64 * 500_000;
+        for call_index in 0..8_u64 {
+            let duration_ns = if call_index % 2 == 0 {
+                20_000_000
+            } else {
+                40_000_000
+            };
+            let cpu_ns = 2_000_000;
+            let off_cpu_ns = duration_ns - cpu_ns;
+            invocations.push(Invocation {
+                id: invocation_id,
+                function_id: work,
+                parent_id: None,
+                tid,
+                start_ns,
+                end_ns: start_ns + duration_ns,
+                complete: true,
+                valid: true,
+            });
+            samples.push(Sample {
+                timestamp_ns: start_ns + cpu_ns / 2,
+                invocation_id,
+                stack_id: on_cpu_stack,
+                tid,
+                cpu: thread_index as u32,
+                state: ExecutionState::OnCpu,
+                weight_ns: cpu_ns,
+            });
+            samples.push(Sample {
+                timestamp_ns: start_ns + cpu_ns + off_cpu_ns / 2,
+                invocation_id,
+                stack_id: off_cpu_stack,
+                tid,
+                cpu: thread_index as u32,
+                state: ExecutionState::OffCpu,
+                weight_ns: off_cpu_ns,
+            });
+            invocation_id += 1;
+            start_ns += duration_ns + 2_000_000;
+        }
+    }
+
+    Profile {
+        format_version: 1,
+        metadata: Metadata {
+            captured_at_unix_ns: 0,
+            command: vec!["fixtures/off_cpu_wait".to_owned()],
+            kernel_release: "synthetic-off-cpu-profile".to_owned(),
+            sample_period_ns: 1_000_000,
+        },
+        functions: vec![
+            Function {
+                id: work,
+                module: "fixtures/off_cpu_wait".to_owned(),
+                module_build_id: Some("synthetic".to_owned()),
+                address: 0x401000,
+                name: "_ZN12SliceFixture11sleep_workEj".to_owned(),
+                demangled_name: "SliceFixture::sleep_work(unsigned int)".to_owned(),
+                source_file: Some("fixtures/off_cpu_wait.cpp".to_owned()),
+                line: Some(17),
+            },
+            Function {
+                id: cpu,
+                module: "fixtures/off_cpu_wait".to_owned(),
+                module_build_id: Some("synthetic".to_owned()),
+                address: 0x401100,
+                name: "_ZN12SliceFixture11cpu_preludeEv".to_owned(),
+                demangled_name: "SliceFixture::cpu_prelude()".to_owned(),
+                source_file: Some("fixtures/off_cpu_wait.cpp".to_owned()),
+                line: Some(10),
+            },
+            Function {
+                id: wait,
+                module: "libstdc++.so".to_owned(),
+                module_build_id: Some("synthetic".to_owned()),
+                address: 0,
+                name: "nanosleep".to_owned(),
+                demangled_name: "std::this_thread::sleep_for(...)".to_owned(),
+                source_file: None,
+                line: None,
+            },
+        ],
+        threads: tids
+            .into_iter()
+            .enumerate()
+            .map(|(index, tid)| Thread {
+                tid,
+                name: Some(format!("wait-worker-{}", index + 1)),
+            })
+            .collect(),
+        invocations,
+        stacks: vec![
+            Stack {
+                id: on_cpu_stack,
+                frames: vec![
+                    frame_with_module(
+                        work,
+                        "SliceFixture::sleep_work(unsigned int)",
+                        "fixtures/off_cpu_wait",
+                    ),
+                    frame_with_module(cpu, "SliceFixture::cpu_prelude()", "fixtures/off_cpu_wait"),
+                ],
+            },
+            Stack {
+                id: off_cpu_stack,
+                frames: vec![
+                    frame_with_module(
+                        work,
+                        "SliceFixture::sleep_work(unsigned int)",
+                        "fixtures/off_cpu_wait",
+                    ),
+                    frame_with_module(wait, "std::this_thread::sleep_for(...)", "libstdc++.so"),
+                ],
+            },
+        ],
+        samples,
+        quality: CaptureQuality {
+            events_generated: 48,
+            samples_generated: 32,
+            complete_invocations: 16,
+            ..CaptureQuality::default()
+        },
+    }
+}
+
 fn frame(function_id: u32, label: &str) -> Frame {
     frame_with_module(function_id, label, "fixtures/tail_divergence")
 }
@@ -1045,6 +1186,7 @@ mod tests {
         assert_eq!(Profile::from_bytes(&bytes).unwrap(), profile);
         profile.validate().unwrap();
         bimodal_profile().validate().unwrap();
+        off_cpu_profile().validate().unwrap();
     }
 
     #[test]
@@ -1200,5 +1342,37 @@ mod tests {
             "BimodalFixture::slow_path()"
         );
         assert!(tail.off_cpu_ns > 0);
+    }
+
+    #[test]
+    fn off_cpu_profile_exposes_waiting_work_across_two_threads() {
+        let profile = off_cpu_profile();
+        let wall = execute_query(&profile, &query(PercentileRange::ALL)).unwrap();
+        let cpu = execute_query(
+            &profile,
+            &Query {
+                metric: Metric::Cpu,
+                ..query(PercentileRange::ALL)
+            },
+        )
+        .unwrap();
+        let off_cpu = execute_query(
+            &profile,
+            &Query {
+                metric: Metric::OffCpu,
+                ..query(PercentileRange::ALL)
+            },
+        )
+        .unwrap();
+        assert_eq!(profile.threads.len(), 2);
+        assert_eq!(wall.available_invocation_count, 16);
+        assert_eq!(wall.latency_min_ns, Some(20_000_000));
+        assert_eq!(wall.latency_max_ns, Some(40_000_000));
+        assert_eq!(cpu.root.value_ns, 32_000_000);
+        assert_eq!(off_cpu.root.value_ns, 448_000_000);
+        assert_eq!(
+            off_cpu.root.children[0].children[0].name,
+            "std::this_thread::sleep_for(...)"
+        );
     }
 }

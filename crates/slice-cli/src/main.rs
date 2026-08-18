@@ -12,7 +12,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use cpp_demangle::Symbol;
 use object::{Object, ObjectSegment, ObjectSymbol, SymbolKind};
 use slice_core::{
-    Function, Metric, PercentileRange, Profile, Query, TimeRange, bimodal_profile,
+    Function, Metric, PercentileRange, Profile, Query, TimeRange, bimodal_profile, off_cpu_profile,
     tail_divergence_profile,
 };
 
@@ -111,6 +111,7 @@ enum CliMetric {
 enum FixtureScenario {
     Tail,
     Bimodal,
+    OffCpu,
 }
 
 impl From<CliMetric> for Metric {
@@ -134,6 +135,7 @@ fn main() -> Result<()> {
             let profile = match scenario {
                 FixtureScenario::Tail => tail_divergence_profile(),
                 FixtureScenario::Bimodal => bimodal_profile(),
+                FixtureScenario::OffCpu => off_cpu_profile(),
             };
             profile.write_to_path(&output)?;
             println!("wrote {}", output.display());

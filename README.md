@@ -34,6 +34,31 @@ reproducible histogram weights that are highest at each center and taper toward
 the edges. That makes the generated report a useful demo without requiring a
 privileged live capture.
 
+## Demo fixture matrix
+
+The repository includes deterministic workloads for the main user journeys:
+
+| Scenario | Demonstrates |
+| --- | --- |
+| `tail` | p99 population filtering exposes a path hidden by aggregate time |
+| `bimodal` | overlapping latency modes, ten worker timelines, and metric switching |
+| `off-cpu` | scheduler wait attribution and an off-CPU flame graph |
+
+Generate and inspect any offline scenario without kernel privileges:
+
+```bash
+slice fixture-profile --scenario off-cpu --output off-cpu.slice
+slice validate off-cpu.slice --require-complete --require-samples
+slice discover off-cpu.slice
+slice view off-cpu.slice --metric off-cpu --output off-cpu.html
+```
+
+The native `nested_population` workload is a negative test for the collector:
+it deliberately creates nested selected invocations so the capture records a
+quality warning instead of presenting misleading percentile data. See
+[`fixtures/README.md`](fixtures/README.md) for build commands and exact symbol
+selectors.
+
 ## Architecture at a glance
 
 The most important design decision is the boundary between the kernel and

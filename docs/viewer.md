@@ -32,6 +32,10 @@ selected metric excludes its state, or when the compiler inlined it. Showing a
 complete call tree for every invocation would require call tracing or
 instrumentation; it is not what statistical stack sampling promises.
 
-The synthetic bimodal profile is a deterministic report fixture. Real native
+The repository ships three deterministic offline scenarios for exercising the
+viewer without privileges: `tail` demonstrates percentile filtering, `bimodal`
+demonstrates overlapping multi-thread latency and all metrics, and `off-cpu`
+demonstrates wait-heavy attribution. The native `nested_population` workload
+is intentionally invalid and is reserved for collector quality handling. Real
 captures use the stacks returned by the eBPF/perf sampling path and therefore
 reflect the actual program and compiler output.

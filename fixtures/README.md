@@ -30,14 +30,30 @@ Use `--iterations N` for a finite native test run.
 slice symbols build/fixtures/bimodal_service --match handle_request
 ```
 
-## Other fixtures
+## Fixture matrix
 
-`tail_divergence` is the percentile correctness fixture. Across every 100
-`SliceFixture::work(unsigned int)` calls, 99 calls execute
-`fast_aggregate_a()` for 3ms and one p99 call executes `slow_tail_b()` for
-297ms. Both children occupy exactly 297ms in the aggregate profile, yet only
-`slow_tail_b()` appears in p99:p100.
+| Workload | Use it to demonstrate | Main selector / command |
+| --- | --- | --- |
+| `tail_divergence` | Percentile-conditioned flame graphs: aggregate paths can differ from p99 paths. | `SliceFixture::work(unsigned int)` |
+| `bimodal_service` | Multi-thread timelines, overlapping latency modes, and wall/CPU/off-CPU comparisons. | `BimodalFixture::handle_request(unsigned long)` |
+| `off_cpu_wait` | Scheduler-event attribution and a wait-heavy off-CPU flame graph. | `SliceFixture::sleep_work(unsigned int)` |
+| `nested_population` | The invalid-input guard: nested selected invocations become a quality warning instead of double-counting. | `SliceFixture::work(unsigned int)` |
 
-`off_cpu_wait` validates scheduler-event attribution. `nested_population`
-intentionally violates the selected-invocation non-overlap rule and must result
-in a visible quality warning rather than misleading percentile analysis.
+`tail_divergence` makes 99 of 100 `SliceFixture::work(unsigned int)` calls
+execute `fast_aggregate_a()` for 3ms and one p99 call execute `slow_tail_b()`
+for 297ms. Both children occupy exactly 297ms in the aggregate profile, yet
+only `slow_tail_b()` appears in p99:p100.
+
+The first three workloads also have deterministic offline equivalents for
+viewer development. Generate one with:
+
+```bash
+slice fixture-profile --scenario tail --output tail.slice
+slice fixture-profile --scenario bimodal --output bimodal.slice
+slice fixture-profile --scenario off-cpu --output off-cpu.slice
+slice view off-cpu.slice --metric off-cpu --output off-cpu.html
+```
+
+`nested_population` intentionally violates the selected-invocation non-overlap
+rule and remains a native capture/collector fixture; it must result in a
+visible quality warning rather than misleading percentile analysis.
