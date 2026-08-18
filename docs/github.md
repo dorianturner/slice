@@ -48,16 +48,22 @@ merge through the merge queue. It must not receive broad organization access,
 repository secrets, or arbitrary workflow administration permissions.
 
 The local Codex completion hook remains available because it runs the ordinary
-no-key repository checks. The hosted agent-review job uses
+no-key repository checks through `just check`. It does not enter a Nix
+development shell. The hosted agent-review job uses
 `openai/codex-action`, but is temporarily manual-only and is not a merge gate
 until an `OPENAI_API_KEY` repository secret is approved and provisioned.
+
+PR descriptions for code, build, fixture, or test changes must include an
+`Architecture impact:` section and a `Test evidence:` section. Changes under
+the core, collector, eBPF, or workflow paths must also include a `Security or
+privilege impact:` section. These headings are validated by the policy gate.
 
 ## Local Codex completion hook
 
 The repository includes [`.codex/hooks.json`](../.codex/hooks.json), which
 runs [`stop-check.sh`](../.codex/hooks/stop-check.sh) on Codex's `Stop` event.
-After the project-local hook is trusted, it runs `just check` (through
-`nix develop` when Nix is available) before allowing a task to finish. A
+After the project-local hook is trusted, it runs `just check` from the
+repository root before allowing a task to finish. A
 failure blocks completion and asks Codex to repair the branch, with a bounded
 retry count. Set `SLICE_STOP_CHECK_COMMAND` only for a deliberate local
 environment override; the hook must never be changed to claim success when a

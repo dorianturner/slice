@@ -1,7 +1,8 @@
 # Testing contract
 
-All commands below run inside `nix develop` and are exposed through the
-repository `justfile`.
+The commands below are exposed through the repository `justfile` and can run
+in a normal development shell. Nix remains available for the separate
+reproducibility check, but the local test loop does not require it.
 
 | Gate | Command | Purpose |
 | --- | --- | --- |

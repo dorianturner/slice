@@ -666,9 +666,11 @@ pub fn tail_divergence_profile() -> Profile {
 }
 
 /// A deterministic multi-threaded profile with a visible 70/30 latency split.
-/// Both modes use overlapping 10ms +/- 5ms and 20ms +/- 5ms duration bands.
-/// The slow population contains both CPU and off-CPU work so the viewer can
-/// demonstrate all three metrics without requiring a privileged capture.
+/// Each mode uses the same deterministic, normal-shaped set of histogram bins
+/// centered at 10ms or 20ms. The fast mode spans 2ms..18ms and the slow mode
+/// spans 12ms..28ms, leaving a visible overlap around the middle. The slow
+/// population contains both CPU and off-CPU work so the viewer can demonstrate
+/// all three metrics without requiring a privileged capture.
 pub fn bimodal_profile() -> Profile {
     let work = 1;
     let fast = 2;
@@ -680,60 +682,81 @@ pub fn bimodal_profile() -> Profile {
     let mut invocations = Vec::new();
     let mut samples = Vec::new();
     let mut invocation_id = 1_u64;
-    const FAST_DURATION_MS: [u64; 10] = [2, 5, 7, 8, 9, 10, 11, 13, 15, 20];
-    const SLOW_DURATION_MS: [u64; 10] = [12, 15, 17, 19, 20, 20, 21, 23, 25, 28];
+    const NORMAL_BINS_NS: [(i64, u64); 17] = [
+        (-8_000_000, 1),
+        (-7_000_000, 1),
+        (-6_000_000, 2),
+        (-5_000_000, 3),
+        (-4_000_000, 5),
+        (-3_000_000, 7),
+        (-2_000_000, 9),
+        (-1_000_000, 11),
+        (0, 12),
+        (1_000_000, 11),
+        (2_000_000, 9),
+        (3_000_000, 7),
+        (4_000_000, 5),
+        (5_000_000, 3),
+        (6_000_000, 2),
+        (7_000_000, 1),
+        (8_000_000, 1),
+    ];
 
-    for (thread_index, tid) in [7101_u32, 7102, 7103, 7104].into_iter().enumerate() {
+    for (thread_index, tid) in [
+        7101_u32, 7102, 7103, 7104, 7105, 7106, 7107, 7108, 7109, 7110,
+    ]
+    .into_iter()
+    .enumerate()
+    {
         let mut start_ns = thread_index as u64 * 100_000;
-        for ordinal in 0..100_u64 {
-            let is_slow = ordinal % 10 >= 7;
-            let sample_index = (ordinal / 10) as usize;
-            let duration_ms = if is_slow {
-                SLOW_DURATION_MS[sample_index]
-            } else {
-                FAST_DURATION_MS[sample_index]
-            };
-            let duration_ns = duration_ms * 1_000_000;
-            let cpu_ns = if is_slow { 5_000_000 } else { duration_ns };
-            let off_cpu_ns = duration_ns.saturating_sub(cpu_ns);
-            let invocation = Invocation {
-                id: invocation_id,
-                function_id: work,
-                parent_id: None,
-                tid,
-                start_ns,
-                end_ns: start_ns + duration_ns,
-                complete: true,
-                valid: true,
-            };
-            invocations.push(invocation);
-            let (stack_id, timestamp_ns) = if is_slow {
-                (slow_cpu_stack, start_ns + off_cpu_ns + cpu_ns / 2)
-            } else {
-                (fast_stack, start_ns + cpu_ns / 2)
-            };
-            samples.push(Sample {
-                timestamp_ns,
-                invocation_id,
-                stack_id,
-                tid,
-                cpu: thread_index as u32,
-                state: ExecutionState::OnCpu,
-                weight_ns: cpu_ns,
-            });
-            if is_slow {
-                samples.push(Sample {
-                    timestamp_ns: start_ns + off_cpu_ns / 2,
-                    invocation_id,
-                    stack_id: slow_wait_stack,
-                    tid,
-                    cpu: thread_index as u32,
-                    state: ExecutionState::OffCpu,
-                    weight_ns: off_cpu_ns,
-                });
+        for &(mode_offset_ns, bin_repetitions) in &NORMAL_BINS_NS {
+            for _ in 0..bin_repetitions {
+                for mode_ordinal in 0..10_u64 {
+                    let is_slow = mode_ordinal >= 7;
+                    let mode_center_ns = if is_slow { 20_000_000 } else { 10_000_000 };
+                    let duration_ns = (mode_center_ns as i64 + mode_offset_ns) as u64;
+                    let cpu_ns = if is_slow { 5_000_000 } else { duration_ns };
+                    let off_cpu_ns = duration_ns.saturating_sub(cpu_ns);
+                    let invocation = Invocation {
+                        id: invocation_id,
+                        function_id: work,
+                        parent_id: None,
+                        tid,
+                        start_ns,
+                        end_ns: start_ns + duration_ns,
+                        complete: true,
+                        valid: true,
+                    };
+                    invocations.push(invocation);
+                    let (stack_id, timestamp_ns) = if is_slow {
+                        (slow_cpu_stack, start_ns + off_cpu_ns + cpu_ns / 2)
+                    } else {
+                        (fast_stack, start_ns + cpu_ns / 2)
+                    };
+                    samples.push(Sample {
+                        timestamp_ns,
+                        invocation_id,
+                        stack_id,
+                        tid,
+                        cpu: thread_index as u32,
+                        state: ExecutionState::OnCpu,
+                        weight_ns: cpu_ns,
+                    });
+                    if is_slow {
+                        samples.push(Sample {
+                            timestamp_ns: start_ns + off_cpu_ns / 2,
+                            invocation_id,
+                            stack_id: slow_wait_stack,
+                            tid,
+                            cpu: thread_index as u32,
+                            state: ExecutionState::OffCpu,
+                            weight_ns: off_cpu_ns,
+                        });
+                    }
+                    invocation_id += 1;
+                    start_ns += duration_ns + 1_000_000;
+                }
             }
-            invocation_id += 1;
-            start_ns += duration_ns + 1_000_000;
         }
     }
 
@@ -787,14 +810,16 @@ pub fn bimodal_profile() -> Profile {
                 line: None,
             },
         ],
-        threads: [7101_u32, 7102, 7103, 7104]
-            .into_iter()
-            .enumerate()
-            .map(|(index, tid)| Thread {
-                tid,
-                name: Some(format!("slice-worker-{}", index + 1)),
-            })
-            .collect(),
+        threads: [
+            7101_u32, 7102, 7103, 7104, 7105, 7106, 7107, 7108, 7109, 7110,
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(index, tid)| Thread {
+            tid,
+            name: Some(format!("slice-worker-{}", index + 1)),
+        })
+        .collect(),
         invocations,
         stacks: vec![
             Stack {
@@ -846,9 +871,9 @@ pub fn bimodal_profile() -> Profile {
         ],
         samples,
         quality: CaptureQuality {
-            events_generated: 800,
-            samples_generated: 680,
-            complete_invocations: 400,
+            events_generated: 18_000,
+            samples_generated: 11_700,
+            complete_invocations: 9_000,
             ..CaptureQuality::default()
         },
     }
@@ -1102,9 +1127,10 @@ mod tests {
         let profile = bimodal_profile();
         let all = execute_query(&profile, &query(PercentileRange::ALL)).unwrap();
         let tail = execute_query(&profile, &query(PercentileRange { low: 95, high: 100 })).unwrap();
-        assert_eq!(all.available_invocation_count, 400);
+        assert_eq!(all.available_invocation_count, 9_000);
         assert_eq!(all.latency_min_ns, Some(2_000_000));
         assert_eq!(all.latency_max_ns, Some(28_000_000));
+        assert_eq!(tail.selected_invocation_ids.len(), 450);
         let fast_max = profile
             .invocations
             .iter()
@@ -1129,8 +1155,46 @@ mod tests {
             .map(Invocation::duration_ns)
             .min()
             .unwrap();
-        assert!(fast_max >= slow_min);
-        assert_eq!(tail.selected_invocation_ids.len(), 20);
+        let slow_max = profile
+            .invocations
+            .iter()
+            .filter(|invocation| {
+                profile
+                    .samples
+                    .iter()
+                    .any(|sample| sample.invocation_id == invocation.id && sample.stack_id == 21)
+            })
+            .map(Invocation::duration_ns)
+            .max()
+            .unwrap();
+        let fast_total: u64 = profile
+            .invocations
+            .iter()
+            .filter(|invocation| {
+                profile
+                    .samples
+                    .iter()
+                    .any(|sample| sample.invocation_id == invocation.id && sample.stack_id == 20)
+            })
+            .map(Invocation::duration_ns)
+            .sum();
+        let slow_total: u64 = profile
+            .invocations
+            .iter()
+            .filter(|invocation| {
+                profile
+                    .samples
+                    .iter()
+                    .any(|sample| sample.invocation_id == invocation.id && sample.stack_id == 21)
+            })
+            .map(Invocation::duration_ns)
+            .sum();
+        assert_eq!(fast_total / 6_300, 10_000_000);
+        assert_eq!(slow_total / 2_700, 20_000_000);
+        assert_eq!(fast_max, 18_000_000);
+        assert_eq!(slow_min, 12_000_000);
+        assert_eq!(slow_max, 28_000_000);
+        assert!(fast_max > slow_min);
         assert_eq!(
             tail.root.children[0].children[0].name,
             "BimodalFixture::slow_path()"

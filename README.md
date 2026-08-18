@@ -12,20 +12,27 @@ Slice is a Linux x86-64 percentile profiler for one focused question:
 
 The repository is designed for agent-first, gated development. Start with
 [`AGENTS.md`](AGENTS.md), [`ARCHITECTURE.md`](ARCHITECTURE.md), and the
-[engineering knowledge map](docs/index.md). Inside `nix develop`, run
-`just check` for the ordinary repository gates; privileged live capture is
-separate and documented in [docs/testing.md](docs/testing.md).
+[engineering knowledge map](docs/index.md). Run `just check` for the ordinary
+repository gates; privileged live capture is separate and documented in
+[docs/testing.md](docs/testing.md). Nix remains available as an optional
+reproducible development environment.
 
 This POC attaches to one exact demangled ELF function, records its invocations
 and sampled user stacks, and renders percentile-conditioned results as a
 self-contained HTML flame graph.
 
-The walkthrough below uses the `bimodal_service` fixture. It has an approximate
-70/30 latency split with overlapping normal jitter around each mode:
+The walkthrough below uses the `bimodal_service` fixture. It has a deterministic
+70/30 latency split with normal-shaped jitter around two distinct modes:
 
-- 70% of calls take roughly 10 ms of CPU work with a 5 ms standard deviation;
-- 30% of calls take roughly 20 ms total with a 5 ms standard deviation, split
-  between scheduler wait and 5 ms of CPU work.
+- 70% of calls peak at 10 ms and are distributed from 2 ms to 18 ms;
+- 30% of calls peak at 20 ms and are distributed from 12 ms to 28 ms, split
+  between scheduler wait and 5 ms of CPU work, with visible overlap around
+  15 ms.
+
+The fixture uses 9,000 synthetic invocations across ten worker threads, with
+reproducible histogram weights that are highest at each center and taper toward
+the edges. That makes the generated report a useful demo without requiring a
+privileged live capture.
 
 ## Architecture at a glance
 
@@ -276,7 +283,26 @@ logic. The viewer renders the timeline, latency histogram, and flame graph in
 the browser using SVG and JavaScript. It has no server dependency, which makes
 profiles easy to archive or share as artifacts.
 
-### CMake, Ninja, Nix, and Linux kernel facilities
+The offline viewer uses a neo-brutalist paper-and-ink presentation. On the
+timeline, drag from one point to another to create a new time window; the
+outlined window can then be refined with its handles or the numeric time
+fields. Wall time is the default metric. The thread selector is a multi-select
+drop-down, and dragging the timeline capture-start strip moves the existing
+window instead of redrawing it.
+
+The histogram shows the selected invocation population and its latency
+percentile window. Drag across the histogram body to draw a latency range, drag
+the upper rail to move the existing range, and use the percentile fields for
+exact values. The generated report is self-contained and can be opened directly
+from the filesystem.
+
+The flame graph is built from sampled user stacks for the selected invocations
+and metric. It starts at the named population function and includes recorded
+descendants; it cannot show code that was never sampled or was inlined by the
+compiler. Use --percentile 0:100 when the report should include the complete
+invocation population rather than only a tail.
+
+### CMake, Ninja, optional Nix, and Linux kernel facilities
 
 - **CMake/Ninja:** build the native C++ fixtures used for live profiling.
 - **Nix flakes:** pin compiler, Rust, CMake, Ninja, and BPF build tooling.
@@ -451,7 +477,7 @@ first request, and captures until you stop it:
 sudo "$SLICE" profile \
   --function 'BimodalFixture::handle_request(unsigned long)' \
   --output bimodal.slice \
-  build/fixtures/bimodal_service -- --workers 6
+  build/fixtures/bimodal_service -- --workers 10
 ```
 
 The fixture runs continuously. Let it run for roughly 10 seconds, then press
@@ -472,7 +498,7 @@ reported `slice doctor` or kernel error before trying to view the file.
 Render the capture through the packaged CLI:
 
 ```bash
-"$SLICE" view bimodal.slice --output bimodal.html
+"$SLICE" view bimodal.slice --output bimodal.html --percentile 0:100
 ```
 
 Open the generated file in a browser:

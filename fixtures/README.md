@@ -11,7 +11,8 @@ ctest --test-dir build/fixtures --output-on-failure
 ## `bimodal_service`
 
 This is the primary README demonstration. It runs until SIGINT by default and
-starts several workers. Every selected `BimodalFixture::handle_request` call
+supports multiple workers; the walkthrough uses ten. Every selected
+`BimodalFixture::handle_request` call
 uses a deterministic global sequence:
 
 - sequence values ending in 0–6 call `fast_path()` and take a normally
@@ -19,14 +20,13 @@ uses a deterministic global sequence:
 - sequence values ending in 7–9 call `slow_path()`, spending a normally
   distributed 15ms ± 5ms waiting and 5ms on CPU, for a 20ms ± 5ms total.
 
-That gives an approximate 70/30 bimodal latency histogram with a useful overlap
-between the two bands. The slow mode is especially useful for comparing
-wall-time, CPU-time, and off-CPU flame views, while the overlap makes the
-middle of the flame graph contain both paths.
+That gives an approximate 70/30 bimodal latency histogram with useful overlap
+between the two bands, including samples around 15ms. The slow mode is
+especially useful for comparing wall-time, CPU-time, and off-CPU flame views.
 Use `--iterations N` for a finite native test run.
 
 ```bash
-./build/fixtures/bimodal_service --workers 4
+./build/fixtures/bimodal_service --workers 10
 slice symbols build/fixtures/bimodal_service --match handle_request
 ```
 

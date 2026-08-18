@@ -27,16 +27,14 @@ fi
 
 if [[ -n "${SLICE_STOP_CHECK_COMMAND:-}" ]]; then
   check_command=(bash -lc "$SLICE_STOP_CHECK_COMMAND")
-elif command -v nix >/dev/null 2>&1; then
-  check_command=(nix develop --accept-flake-config -c just check)
 elif command -v just >/dev/null 2>&1; then
   check_command=(just check)
 else
   if [[ "$stop_hook_active" == true ]]; then
-    echo "Codex stop hook could not find Nix or just after a repair attempt; stopping with checks unresolved." >&2
+    echo "Codex stop hook could not find just after a repair attempt; stopping with checks unresolved." >&2
     exit 0
   fi
-  printf '%s\n' '{"decision":"block","reason":"Cannot run repository checks: install Nix or just, then rerun the task. The stop hook will not claim success without checks."}'
+  printf '%s\n' '{"decision":"block","reason":"Cannot run repository checks: install just, then rerun the task. The stop hook will not claim success without checks."}'
   exit 0
 fi
 
@@ -53,4 +51,4 @@ if (( attempt > max_attempts )); then
   exit 0
 fi
 
-printf '%s\n' "{\"decision\":\"block\",\"reason\":\"Repository checks failed (attempt $attempt/$max_attempts). Run just check or the Nix-backed equivalent, inspect the failure, fix the branch, and try to finish again.\"}"
+printf '%s\n' "{\"decision\":\"block\",\"reason\":\"Repository checks failed (attempt $attempt/$max_attempts). Run just check, inspect the failure, fix the branch, and try to finish again.\"}"
