@@ -102,3 +102,41 @@ fn doctor_explains_privileged_capture_requirements() {
         .stdout(predicate::str::contains("Max locked memory"))
         .stdout(predicate::str::contains("sudo"));
 }
+
+#[test]
+fn validate_accepts_a_complete_fixture_profile() {
+    let temp = tempdir().unwrap();
+    let capture = temp.path().join("valid.slice");
+
+    Command::cargo_bin("slice")
+        .unwrap()
+        .args(["fixture-profile", "--output", capture.to_str().unwrap()])
+        .assert()
+        .success();
+
+    Command::cargo_bin("slice")
+        .unwrap()
+        .args([
+            "validate",
+            capture.to_str().unwrap(),
+            "--require-complete",
+            "--require-samples",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("valid profile"));
+}
+
+#[test]
+fn validate_rejects_an_invalid_profile_envelope() {
+    let temp = tempdir().unwrap();
+    let invalid = temp.path().join("invalid.slice");
+    std::fs::write(&invalid, b"not a Slice profile").unwrap();
+
+    Command::cargo_bin("slice")
+        .unwrap()
+        .args(["validate", invalid.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("not a Slice v1 profile"));
+}

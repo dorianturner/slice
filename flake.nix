@@ -14,7 +14,7 @@
       system = "x86_64-linux";
       overlays = [ (import rust-overlay) ];
       pkgs = import nixpkgs { inherit system overlays; };
-      rustToolchain = pkgs.rust-bin.stable.latest.default.override {
+      rustToolchain = pkgs.rust-bin.stable."1.85.1".default.override {
         extensions = [ "rust-src" "rustfmt" "clippy" ];
         targets = [ "wasm32-unknown-unknown" ];
       };
@@ -33,6 +33,10 @@
         wasm-bindgen-cli
         binaryen
         cargo-nextest
+        cargo-deny
+        actionlint
+        gitleaks
+        jq
         cmake
         ninja
         just

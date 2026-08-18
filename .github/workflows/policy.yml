@@ -1,0 +1,30 @@
+name: policy
+
+on:
+  pull_request:
+  merge_group:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  policy:
+    runs-on: ubuntu-latest
+    env:
+      CI: true
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25
+      - name: Run repository contract
+        run: |
+          nix develop --accept-flake-config -c bash scripts/check-repository.sh
+      - name: Validate pull request metadata
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          body_file=$(mktemp)
+          jq -r '.pull_request.body // ""' "$GITHUB_EVENT_PATH" > "$body_file"
+          nix develop --accept-flake-config -c bash scripts/check-pr-contract.sh "$body_file"

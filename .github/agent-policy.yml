@@ -1,0 +1,11 @@
+max_repair_attempts: 5
+trusted_head_repository_only: true
+required_checks:
+  - policy
+  - rust
+  - bpf
+  - native
+  - nix
+  - agent-review
+optional_checks:
+  - privileged-live-capture
