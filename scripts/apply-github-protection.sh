@@ -9,7 +9,7 @@ fi
 payload='{
   "required_status_checks": {
     "strict": true,
-    "contexts": ["policy", "rust", "bpf", "native", "nix", "agent-review"]
+    "contexts": ["policy", "rust", "bpf", "native", "nix"]
   },
   "enforce_admins": true,
   "required_pull_request_reviews": {
@@ -102,8 +102,7 @@ ruleset_payload='{
           {"context": "rust"},
           {"context": "bpf"},
           {"context": "native"},
-          {"context": "nix"},
-          {"context": "agent-review"}
+          {"context": "nix"}
         ],
         "strict_required_status_checks_policy": true
       }
@@ -127,4 +126,4 @@ fi
 
 echo "Applied protected main branch, squash-only merge settings, and selected actions for $repo."
 echo "Merge queue could not be configured through this account's GitHub API; strict up-to-date checks remain enforced."
-echo "The OPENAI_API_KEY repository secret must still be added before agent-review can pass."
+echo "Hosted agent-review is temporarily disabled until an OPENAI_API_KEY repository secret is provisioned."

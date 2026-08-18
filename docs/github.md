@@ -12,20 +12,24 @@ script never pretends a missing agent or exhausted repair budget is success.
 
 ## Required workflows
 
-The required check names are:
+The required no-key check names are:
 
 - `policy`
 - `rust`
 - `bpf`
 - `native`
 - `nix`
-- `agent-review`
+
+The hosted `agent-review` workflow is temporarily disabled because it requires
+an OpenAI API key. Its workflow remains available for manual dispatch only and
+must be restored to `pull_request` and `merge_group` after the repository has
+an approved `OPENAI_API_KEY` secret.
 
 `privileged-live-capture` is currently optional and manually dispatched because
 the repository has no capable self-hosted runner. It must be promoted to a
 required check only after such a runner is provisioned.
 
-The `main` branch must require pull requests, all six required checks, up-to-date
+The `main` branch must require pull requests, all five required checks, up-to-date
 branches, merge queue participation, squash merges, and no ordinary bypass.
 Direct pushes should be disabled. Configure these settings with a GitHub
 ruleset or equivalent repository administration; committed workflow files alone
@@ -43,10 +47,10 @@ The agent identity may create branches, open/update PRs, request checks, and
 merge through the merge queue. It must not receive broad organization access,
 repository secrets, or arbitrary workflow administration permissions.
 
-The agent-review job uses the hosted `openai/codex-action` and requires an
-`OPENAI_API_KEY` repository secret. It must return a failing check when Codex
-is unavailable or reports unresolved must-fix findings; a placeholder success
-is not acceptable.
+The local Codex completion hook remains available because it runs the ordinary
+no-key repository checks. The hosted agent-review job uses
+`openai/codex-action`, but is temporarily manual-only and is not a merge gate
+until an `OPENAI_API_KEY` repository secret is approved and provisioned.
 
 ## Local Codex completion hook
 

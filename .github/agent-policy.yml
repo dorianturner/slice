@@ -6,6 +6,5 @@ required_checks:
   - bpf
   - native
   - nix
-  - agent-review
 optional_checks:
   - privileged-live-capture
