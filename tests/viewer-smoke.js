@@ -78,6 +78,7 @@ class Element {
 
 const elements = new Map();
 for (const match of html.matchAll(/\bid="([^"]+)"/g)) elements.set(match[1], new Element('div'));
+for (const id of ['viewer-error', 'empty', 'flame-tooltip']) elements.get(id).hidden = true;
 const scriptContent = (id) => {
   const match = html.match(new RegExp(`<script[^>]*\\bid="${id}"[^>]*>([\\s\\S]*?)</script>`));
   assert(match, `missing ${id} script`);
