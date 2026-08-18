@@ -1,0 +1,16 @@
+{
+  "description": "Run the repository contract before Codex ends a task.",
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .codex/hooks/stop-check.sh",
+            "timeout": 1800
+          }
+        ]
+      }
+    ]
+  }
+}

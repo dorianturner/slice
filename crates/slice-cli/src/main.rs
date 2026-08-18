@@ -88,6 +88,16 @@ enum Command {
     Discover { profile: PathBuf },
     /// Check local kernel and permission prerequisites for privileged eBPF capture.
     Doctor,
+    /// Validate a profile's file envelope and semantic references.
+    Validate {
+        profile: PathBuf,
+        /// Require at least one complete and valid invocation.
+        #[arg(long)]
+        require_complete: bool,
+        /// Require at least one captured sample.
+        #[arg(long)]
+        require_samples: bool,
+    },
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -154,6 +164,11 @@ fn main() -> Result<()> {
         ),
         Command::Discover { profile } => discover(profile),
         Command::Doctor => doctor(),
+        Command::Validate {
+            profile,
+            require_complete,
+            require_samples,
+        } => validate(profile, require_complete, require_samples),
     }
 }
 
@@ -396,6 +411,9 @@ fn view(
 ) -> Result<()> {
     let profile = Profile::read_from_path(&profile_path)
         .with_context(|| format!("could not read profile {}", profile_path.display()))?;
+    profile
+        .validate()
+        .with_context(|| format!("profile validation failed for {}", profile_path.display()))?;
     let function_id = profile
         .functions
         .first()
@@ -419,6 +437,9 @@ fn view(
 
 fn discover(profile_path: PathBuf) -> Result<()> {
     let profile = Profile::read_from_path(&profile_path)?;
+    profile
+        .validate()
+        .with_context(|| format!("profile validation failed for {}", profile_path.display()))?;
     let stacks = profile
         .stacks
         .iter()
@@ -436,6 +457,33 @@ fn discover(profile_path: PathBuf) -> Result<()> {
     for (name, time) in inclusive.into_iter().rev().take(30) {
         println!("{:>12.3} ms  {name}", time as f64 / 1e6);
     }
+    Ok(())
+}
+
+fn validate(profile_path: PathBuf, require_complete: bool, require_samples: bool) -> Result<()> {
+    let profile = Profile::read_from_path(&profile_path)
+        .with_context(|| format!("could not read profile {}", profile_path.display()))?;
+    profile
+        .validate()
+        .with_context(|| format!("profile validation failed for {}", profile_path.display()))?;
+    if require_complete
+        && !profile
+            .invocations
+            .iter()
+            .any(|invocation| invocation.complete && invocation.valid)
+    {
+        bail!("profile contains no complete valid invocations");
+    }
+    if require_samples && profile.samples.is_empty() {
+        bail!("profile contains no samples");
+    }
+    println!(
+        "valid profile: {} invocations, {} samples, {} dropped events, {} dropped samples",
+        profile.invocations.len(),
+        profile.samples.len(),
+        profile.quality.events_dropped,
+        profile.quality.samples_dropped
+    );
     Ok(())
 }
 

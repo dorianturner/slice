@@ -8,6 +8,14 @@ Slice is a Linux x86-64 percentile profiler for one focused question:
 
 > What does the call stack look like during the slowest executions of one C++ function?
 
+## Engineering workflow
+
+The repository is designed for agent-first, gated development. Start with
+[`AGENTS.md`](AGENTS.md), [`ARCHITECTURE.md`](ARCHITECTURE.md), and the
+[engineering knowledge map](docs/index.md). Inside `nix develop`, run
+`just check` for the ordinary repository gates; privileged live capture is
+separate and documented in [docs/testing.md](docs/testing.md).
+
 This POC attaches to one exact demangled ELF function, records its invocations
 and sampled user stacks, and renders percentile-conditioned results as a
 self-contained HTML flame graph.

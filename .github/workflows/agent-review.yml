@@ -1,0 +1,34 @@
+name: agent-review
+
+on:
+  # Temporarily disabled: hosted Codex review requires a paid OpenAI API key.
+  # Restore pull_request and merge_group after OPENAI_API_KEY is provisioned.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  agent-review:
+    # Fork PRs do not receive the OpenAI secret. Promote them to a trusted
+    # same-repository branch before the Codex review check can run.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.event_name == 'pull_request' && format('refs/pull/{0}/merge', github.event.pull_request.number) || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Run Codex review
+        id: codex-review
+        uses: openai/codex-action@b11346a6fa031e2e164ab4b7c7ea201afffd7d59
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          prompt-file: .github/codex/prompts/review.md
+          output-file: codex-review.md
+      - name: Require an explicit passing review
+        run: |
+          grep -q '^RESULT: PASS$' codex-review.md

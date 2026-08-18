@@ -1,0 +1,21 @@
+name: rust
+
+on:
+  pull_request:
+  merge_group:
+
+permissions:
+  contents: read
+
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25
+      - name: Format
+        run: nix develop --accept-flake-config -c just format
+      - name: Lint
+        run: nix develop --accept-flake-config -c just lint
+      - name: Test
+        run: nix develop --accept-flake-config -c just test

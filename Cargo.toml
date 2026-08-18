@@ -5,6 +5,7 @@ members = [
   "crates/slice-ebpf",
   "crates/slice-render",
   "crates/slice-cli",
+  "tools/repo-check",
 ]
 default-members = ["crates/slice-cli"]
 resolver = "2"

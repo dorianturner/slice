@@ -1,0 +1,21 @@
+name: privileged-live-capture
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  privileged-live-capture:
+    # Never run arbitrary fork code with BPF capabilities. A trusted
+    # same-repository branch or merge-queue ref is required.
+    runs-on: [self-hosted, ephemeral, linux-x86-64, bpf]
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25
+      - name: Run strict live capture gate
+        env:
+          REQUIRE_PRIVILEGED: "1"
+        run: bash tests/privileged-capture.sh

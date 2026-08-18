@@ -53,7 +53,130 @@ impl Profile {
         if profile.format_version != 1 {
             return Err(ProfileError::UnsupportedVersion(profile.format_version));
         }
+        profile.validate()?;
         Ok(profile)
+    }
+
+    /// Validate all cross-references and invariants required by consumers.
+    ///
+    /// Deserialization validates the file envelope and format version; this
+    /// method validates the semantic graph inside that envelope. Keeping the
+    /// check here lets the CLI, live-capture gate, and future integrations use
+    /// exactly the same contract.
+    pub fn validate(&self) -> Result<(), ProfileValidationError> {
+        if self.format_version != 1 {
+            return Err(ProfileValidationError::UnsupportedVersion(
+                self.format_version,
+            ));
+        }
+
+        let function_ids = unique_u32_ids(
+            self.functions.iter().map(|function| function.id),
+            "function",
+        )?;
+        let thread_ids = unique_u32_ids(self.threads.iter().map(|thread| thread.tid), "thread")?;
+        let invocation_ids = unique_u64_ids(
+            self.invocations.iter().map(|invocation| invocation.id),
+            "invocation",
+        )?;
+        let stack_ids = unique_u32_ids(self.stacks.iter().map(|stack| stack.id), "stack")?;
+        let parents = self
+            .invocations
+            .iter()
+            .map(|invocation| (invocation.id, invocation.parent_id))
+            .collect::<HashMap<_, _>>();
+
+        for invocation in &self.invocations {
+            if !function_ids.contains(&invocation.function_id) {
+                return Err(ProfileValidationError::UnknownFunction {
+                    record: "invocation",
+                    id: invocation.function_id,
+                });
+            }
+            if !thread_ids.contains(&invocation.tid) {
+                return Err(ProfileValidationError::UnknownThread(invocation.tid));
+            }
+            if invocation.end_ns < invocation.start_ns {
+                return Err(ProfileValidationError::InvalidInvocationBounds(
+                    invocation.id,
+                ));
+            }
+            if let Some(parent_id) = invocation.parent_id {
+                if !invocation_ids.contains(&parent_id) {
+                    return Err(ProfileValidationError::UnknownInvocation(parent_id));
+                }
+            }
+            let mut ancestry = BTreeSet::new();
+            let mut current = Some(invocation.id);
+            while let Some(id) = current {
+                if !ancestry.insert(id) {
+                    return Err(ProfileValidationError::CyclicInvocationParent(
+                        invocation.id,
+                    ));
+                }
+                current = parents.get(&id).copied().flatten();
+            }
+        }
+
+        for stack in &self.stacks {
+            for frame in &stack.frames {
+                if let Some(function_id) = frame.function_id {
+                    if !function_ids.contains(&function_id) {
+                        return Err(ProfileValidationError::UnknownFunction {
+                            record: "frame",
+                            id: function_id,
+                        });
+                    }
+                }
+            }
+        }
+
+        for sample in &self.samples {
+            if !invocation_ids.contains(&sample.invocation_id) {
+                return Err(ProfileValidationError::UnknownInvocation(
+                    sample.invocation_id,
+                ));
+            }
+            if !stack_ids.contains(&sample.stack_id) {
+                return Err(ProfileValidationError::UnknownStack(sample.stack_id));
+            }
+            let invocation = self
+                .invocations
+                .iter()
+                .find(|invocation| invocation.id == sample.invocation_id)
+                .expect("sample invocation was checked above");
+            if sample.tid != invocation.tid {
+                return Err(ProfileValidationError::SampleThreadMismatch {
+                    sample_invocation: sample.invocation_id,
+                    sample_tid: sample.tid,
+                    invocation_tid: invocation.tid,
+                });
+            }
+            if sample.timestamp_ns < invocation.start_ns || sample.timestamp_ns > invocation.end_ns
+            {
+                return Err(ProfileValidationError::SampleOutsideInvocation(
+                    sample.invocation_id,
+                ));
+            }
+        }
+
+        let complete = self
+            .invocations
+            .iter()
+            .filter(|invocation| invocation.complete && invocation.valid)
+            .count() as u64;
+        let incomplete = self
+            .invocations
+            .iter()
+            .filter(|invocation| !invocation.complete || !invocation.valid)
+            .count() as u64;
+        if self.quality.complete_invocations > complete
+            || self.quality.incomplete_invocations > incomplete
+            || self.quality.samples_generated < self.samples.len() as u64
+        {
+            return Err(ProfileValidationError::QualityCountersInconsistent);
+        }
+        Ok(())
     }
 
     pub fn capture_bounds(&self) -> Option<TimeRange> {
@@ -67,6 +190,35 @@ impl Profile {
         }
         Some(TimeRange { from_ns, to_ns })
     }
+}
+
+fn unique_u32_ids<I>(ids: I, kind: &'static str) -> Result<BTreeSet<u32>, ProfileValidationError>
+where
+    I: IntoIterator<Item = u32>,
+{
+    let mut seen = BTreeSet::new();
+    for id in ids {
+        if !seen.insert(id) {
+            return Err(ProfileValidationError::DuplicateId {
+                kind,
+                id: u64::from(id),
+            });
+        }
+    }
+    Ok(seen)
+}
+
+fn unique_u64_ids<I>(ids: I, kind: &'static str) -> Result<BTreeSet<u64>, ProfileValidationError>
+where
+    I: IntoIterator<Item = u64>,
+{
+    let mut seen = BTreeSet::new();
+    for id in ids {
+        if !seen.insert(id) {
+            return Err(ProfileValidationError::DuplicateId { kind, id });
+        }
+    }
+    Ok(seen)
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -715,6 +867,38 @@ fn frame_with_module(function_id: u32, label: &str, module: &str) -> Frame {
     }
 }
 
+#[derive(Debug, Eq, PartialEq, Error)]
+pub enum ProfileValidationError {
+    #[error("unsupported Slice profile version {0}")]
+    UnsupportedVersion(u16),
+    #[error("duplicate {kind} id {id}")]
+    DuplicateId { kind: &'static str, id: u64 },
+    #[error("invocation references unknown function {id} ({record})")]
+    UnknownFunction { record: &'static str, id: u32 },
+    #[error("invocation references unknown thread {0}")]
+    UnknownThread(u32),
+    #[error("record references unknown invocation {0}")]
+    UnknownInvocation(u64),
+    #[error("invocation {0} has a cyclic parent chain")]
+    CyclicInvocationParent(u64),
+    #[error("sample references unknown stack {0}")]
+    UnknownStack(u32),
+    #[error("invocation {0} has an end before its start")]
+    InvalidInvocationBounds(u64),
+    #[error(
+        "sample for invocation {sample_invocation} has TID {sample_tid}, expected {invocation_tid}"
+    )]
+    SampleThreadMismatch {
+        sample_invocation: u64,
+        sample_tid: u32,
+        invocation_tid: u32,
+    },
+    #[error("sample is outside invocation {0} bounds")]
+    SampleOutsideInvocation(u64),
+    #[error("capture quality counters are inconsistent with profile records")]
+    QualityCountersInconsistent,
+}
+
 #[derive(Debug, Error)]
 pub enum ProfileError {
     #[error("not a Slice v1 profile")]
@@ -725,6 +909,8 @@ pub enum ProfileError {
     Io(#[from] std::io::Error),
     #[error("profile serialization error: {0}")]
     Json(#[from] serde_json::Error),
+    #[error("invalid profile: {0}")]
+    InvalidProfile(#[from] ProfileValidationError),
 }
 
 #[derive(Debug, Error, Eq, PartialEq)]
@@ -832,6 +1018,40 @@ mod tests {
         let bytes = profile.to_bytes().unwrap();
         assert!(bytes.starts_with(FILE_MAGIC));
         assert_eq!(Profile::from_bytes(&bytes).unwrap(), profile);
+        profile.validate().unwrap();
+        bimodal_profile().validate().unwrap();
+    }
+
+    #[test]
+    fn profile_validation_rejects_unknown_sample_references() {
+        let mut profile = tail_divergence_profile();
+        profile.samples[0].stack_id = 999;
+        assert_eq!(
+            profile.validate(),
+            Err(ProfileValidationError::UnknownStack(999))
+        );
+    }
+
+    #[test]
+    fn profile_deserialization_rejects_invalid_semantic_graphs() {
+        let mut profile = tail_divergence_profile();
+        profile.samples[0].stack_id = 999;
+        let error = Profile::from_bytes(&profile.to_bytes().unwrap()).unwrap_err();
+        assert!(matches!(
+            error,
+            ProfileError::InvalidProfile(ProfileValidationError::UnknownStack(999))
+        ));
+    }
+
+    #[test]
+    fn profile_validation_rejects_cyclic_invocation_parents() {
+        let mut profile = tail_divergence_profile();
+        profile.invocations[0].parent_id = Some(profile.invocations[1].id);
+        profile.invocations[1].parent_id = Some(profile.invocations[0].id);
+        assert_eq!(
+            profile.validate(),
+            Err(ProfileValidationError::CyclicInvocationParent(1))
+        );
     }
 
     #[test]
