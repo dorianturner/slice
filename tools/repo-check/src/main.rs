@@ -63,6 +63,7 @@ fn required_paths(root: &Path) -> Result<()> {
         ".github/pull_request_template.md",
         ".github/dependabot.yml",
         ".github/agent-policy.yml",
+        ".github/actionlint.yaml",
         "tests/viewer-smoke.sh",
         "tests/viewer-smoke.js",
     ];
