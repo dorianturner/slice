@@ -16,8 +16,8 @@ if grep -Eq '^(Cargo\.toml|Cargo\.lock|crates/|fixtures/|flake\.nix|tests/)' <<<
     echo "PR contract: architecture impact is required for code/build/test changes" >&2
     exit 1
   }
-  grep -Eiq 'test evidence:' "$body_file" || {
-    echo "PR contract: test evidence is required for code/build/test changes" >&2
+  grep -Eiq 'test evidence:|tests run:' "$body_file" || {
+    echo "PR contract: test evidence or tests run is required for code/build/test changes" >&2
     exit 1
   }
 fi

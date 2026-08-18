@@ -14,6 +14,6 @@ Describe the problem and intended behavior.
 
 ## Evidence
 
-- Tests run:
+- Test evidence:
 - Documentation updated: none / describe
 - Required checks intentionally not applicable: none / explain
