@@ -9,6 +9,7 @@ duplicating these documents.
 - [Security](security.md) — eBPF, runners, dependencies, and artifacts.
 - [GitHub workflow](github.md) — branch rules and agent lifecycle.
 - [Quality](quality.md) — current quality grades and known gaps.
+- [Viewer](viewer.md) — offline report interactions and sampled-stack semantics.
 - [Plans](plans/active/index.md) — active execution plans.
 - [Technical debt](tech-debt.md) — small, continuously maintained debt list.
 

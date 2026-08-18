@@ -8,5 +8,5 @@ trap 'rm -rf "$slice_test_root_tmp"' EXIT
 cargo run --quiet -p slice-cli -- fixture-profile \
   --scenario bimodal --output "$slice_test_root_tmp/bimodal.slice"
 cargo run --quiet -p slice-cli -- view "$slice_test_root_tmp/bimodal.slice" \
-  --output "$slice_test_root_tmp/bimodal.html" --percentile 95:100 --metric off-cpu
+  --output "$slice_test_root_tmp/bimodal.html" --percentile 95:100
 node "$slice_test_root/tests/viewer-smoke.js" "$slice_test_root_tmp/bimodal.html"

@@ -45,6 +45,7 @@ class Element {
   }
   dispatchEvent(event) {
     event.target ||= this;
+    this[`on${event.type}`]?.(event);
     for (const handler of this.listeners.get(event.type) ?? []) handler(event);
   }
   click() { this.dispatchEvent({ type: 'click', target: this }); }
@@ -114,14 +115,43 @@ const context = {
 vm.runInNewContext(javascript, context, { filename: reportPath });
 
 assert(elements.get('population-name').textContent.includes('BimodalFixture::handle_request'));
-assert(elements.get('quality').textContent.includes('samples'));
+assert(!html.includes('Firefox Profiler-inspired execution explorer'));
+assert(!html.includes('PERCENTILE-CONDITIONED PROFILE'));
+assert(!html.includes('Profile quality · complete capture data'));
 assert(elements.get('timeline').children.length > 10, 'timeline should contain lanes and activity');
 assert(elements.get('histogram').children.length > 10, 'histogram should contain bins and handles');
+assert(elements.get('histogram').querySelectorAll('.hist-label').length >= 5, 'histogram should contain intermediate time labels');
 assert(elements.get('flame').children.length > 0, 'flame graph should contain frames');
 assert(elements.get('flame').querySelectorAll('.frame').every(frame => frame.getAttribute('tabindex') === '0'));
 assert(elements.get('timeline').querySelectorAll('.timeline-invocation').every(bar => bar.getAttribute('aria-label')));
-assert(elements.get('threads').children.length === 4, 'all fixture threads should be observable');
+assert(elements.get('threads').children.length === 10, 'all fixture threads should be observable');
 assert(elements.get('empty').hidden, 'fixture query should not be empty');
 assert(elements.get('viewer-error').hidden, 'viewer should not report a runtime error');
+
+const timeline = elements.get('timeline');
+const initialCaptureEnd = Number(elements.get('time-high').value);
+timeline.dispatchEvent({ type: 'pointerdown', pointerId: 7, clientX: 160, preventDefault() {} });
+timeline.dispatchEvent({ type: 'pointermove', pointerId: 7, clientX: 640, preventDefault() {} });
+timeline.dispatchEvent({ type: 'pointerup', pointerId: 7, clientX: 640, preventDefault() {} });
+const selectedFrom = Number(elements.get('time-low').value);
+const selectedTo = Number(elements.get('time-high').value);
+assert(selectedFrom > 0 && selectedTo < initialCaptureEnd, 'timeline drag should create an interior time range');
+assert(selectedFrom < selectedTo, 'timeline drag should preserve ordered time bounds');
+
+const histogram = elements.get('histogram');
+const initialHistogramWindow = histogram.querySelector('.hist-window');
+const initialHistogramX = Number(initialHistogramWindow.getAttribute('x'));
+histogram.dispatchEvent({ type: 'pointerdown', pointerId: 8, clientX: 150, clientY: 70, preventDefault() {} });
+histogram.dispatchEvent({ type: 'pointermove', pointerId: 8, clientX: 600, clientY: 70, preventDefault() {} });
+histogram.dispatchEvent({ type: 'pointerup', pointerId: 8, clientX: 600, clientY: 70, preventDefault() {} });
+const selectedHistogramX = Number(histogram.querySelector('.hist-window').getAttribute('x'));
+assert(selectedHistogramX !== initialHistogramX, 'histogram drag should create a new latency range');
+
+const movedHistogramX = Number(histogram.querySelector('.hist-window').getAttribute('x'));
+histogram.dispatchEvent({ type: 'pointerdown', pointerId: 9, clientX: 300, clientY: 8, preventDefault() {} });
+histogram.dispatchEvent({ type: 'pointermove', pointerId: 9, clientX: 360, clientY: 8, preventDefault() {} });
+histogram.dispatchEvent({ type: 'pointerup', pointerId: 9, clientX: 360, clientY: 8, preventDefault() {} });
+const shiftedHistogramX = Number(histogram.querySelector('.hist-window').getAttribute('x'));
+assert(shiftedHistogramX !== movedHistogramX, 'histogram rail drag should move the latency window');
 
 console.log('viewer-smoke: generated report executed and rendered observable controls');

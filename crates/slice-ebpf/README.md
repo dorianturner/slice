@@ -15,6 +15,6 @@ POC contract: a selected population must be synchronous and non-overlapping on
 each OS thread. A dropped ring-buffer event also becomes profile-quality data;
 it is never concealed as a valid invocation.
 
-Run `bash tests/bpf-build.sh` inside `nix develop` to compile the BPF object.
-Loading/attaching it needs root or the capabilities reported by `slice doctor`.
-
+Run `bash tests/bpf-build.sh` from the repository development environment to
+compile the BPF object. Nix is optional for this local check. Loading/attaching
+it needs root or the capabilities reported by `slice doctor`.

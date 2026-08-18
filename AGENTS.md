@@ -15,7 +15,8 @@ as the source of truth: do not rely on undocumented chat or local assumptions.
 
 ## Commands
 
-Run inside `nix develop`:
+Run from the repository development environment. Nix is optional for the
+ordinary local loop:
 
 ```text
 just check       # all ordinary repository gates
