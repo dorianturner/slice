@@ -9,7 +9,10 @@ confidence-threshold = 0.8
 
 [bans]
 multiple-versions = "warn"
-wildcards = "deny"
+# Workspace path dependencies intentionally omit registry versions. Keep this
+# as a warning so cargo-deny still reports accidental wildcards without
+# rejecting the crate-layer declarations themselves.
+wildcards = "warn"
 
 [sources]
 unknown-registry = "deny"

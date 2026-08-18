@@ -38,6 +38,7 @@ class Element {
   setAttribute(name, value) { this.attributes.set(name, String(value)); }
   getAttribute(name) { return this.attributes.get(name) ?? null; }
   appendChild(child) { this.children.push(child); return child; }
+  append(...children) { children.forEach(child => this.appendChild(child)); }
   addEventListener(name, handler) {
     if (!this.listeners.has(name)) this.listeners.set(name, []);
     this.listeners.get(name).push(handler);
