@@ -10,13 +10,14 @@ build = "build.rs"
 anyhow.workspace = true
 cpp_demangle.workspace = true
 libc = "0.2.189"
-libbpf-rs = { version = "0.26.2", default-features = false }
+libbpf-rs = { version = "0.26.2" }
 object.workspace = true
+slice-capture = { path = "../slice-capture" }
 slice-collector = { path = "../slice-collector" }
 slice-core = { path = "../slice-core" }
 
 [build-dependencies]
-libbpf-cargo = { version = "0.26.2", default-features = false }
+libbpf-cargo = { version = "0.26.2" }
 
 [lints]
 workspace = true

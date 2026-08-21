@@ -11,10 +11,9 @@ use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand, ValueEnum};
 use cpp_demangle::Symbol;
 use object::{Object, ObjectSegment, ObjectSymbol, SymbolKind};
-use slice_core::{
-    Function, Metric, PercentileRange, Profile, Query, TimeRange, bimodal_profile, off_cpu_profile,
-    tail_divergence_profile,
-};
+use slice_capture::{CapturePort, CaptureRequest, CheckStatus};
+use slice_core::{ExecutionState, Function, Metric, PercentileRange, Profile, Query, TimeRange};
+use slice_ebpf::LinuxCaptureAdapter;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -38,14 +37,6 @@ enum Command {
         /// Case-insensitive substring applied to the demangled name.
         #[arg(long)]
         r#match: Option<String>,
-    },
-    /// Create a deterministic profile used by tests and demos.
-    FixtureProfile {
-        #[arg(short, long, default_value = "tail-divergence.slice")]
-        output: PathBuf,
-        /// Select the offline scenario.
-        #[arg(long, value_enum, default_value_t = FixtureScenario::Tail)]
-        scenario: FixtureScenario,
     },
     /// Profile a started or launched process at one exact demangled ELF function.
     Profile {
@@ -85,7 +76,12 @@ enum Command {
         metric: CliMetric,
     },
     /// Rank observed functions from an existing capture without pretending to know p95.
-    Discover { profile: PathBuf },
+    Discover {
+        profile: PathBuf,
+        /// Restrict discovery to wall, on-CPU, or off-CPU samples.
+        #[arg(long, value_enum, default_value_t = CliMetric::Wall)]
+        metric: CliMetric,
+    },
     /// Check local kernel and permission prerequisites for privileged eBPF capture.
     Doctor,
     /// Validate a profile's file envelope and semantic references.
@@ -97,6 +93,9 @@ enum Command {
         /// Require at least one captured sample.
         #[arg(long)]
         require_samples: bool,
+        /// Require at least one scheduler-derived off-CPU sample.
+        #[arg(long)]
+        require_off_cpu: bool,
     },
 }
 
@@ -104,13 +103,6 @@ enum Command {
 enum CliMetric {
     Wall,
     Cpu,
-    OffCpu,
-}
-
-#[derive(Clone, Copy, Debug, ValueEnum)]
-enum FixtureScenario {
-    Tail,
-    Bimodal,
     OffCpu,
 }
 
@@ -131,16 +123,6 @@ fn main() -> Result<()> {
             module,
             r#match,
         } => list_symbols(module.as_ref().unwrap_or(&binary), r#match.as_deref()),
-        Command::FixtureProfile { output, scenario } => {
-            let profile = match scenario {
-                FixtureScenario::Tail => tail_divergence_profile(),
-                FixtureScenario::Bimodal => bimodal_profile(),
-                FixtureScenario::OffCpu => off_cpu_profile(),
-            };
-            profile.write_to_path(&output)?;
-            println!("wrote {}", output.display());
-            Ok(())
-        }
         Command::Profile {
             pid,
             module,
@@ -164,13 +146,14 @@ fn main() -> Result<()> {
             &percentile,
             metric.into(),
         ),
-        Command::Discover { profile } => discover(profile),
+        Command::Discover { profile, metric } => discover(profile, metric.into()),
         Command::Doctor => doctor(),
         Command::Validate {
             profile,
             require_complete,
             require_samples,
-        } => validate(profile, require_complete, require_samples),
+            require_off_cpu,
+        } => validate(profile, require_complete, require_samples, require_off_cpu),
     }
 }
 
@@ -280,6 +263,7 @@ fn profile(
     program: Option<PathBuf>,
     args: Vec<String>,
 ) -> Result<()> {
+    let adapter = LinuxCaptureAdapter;
     let (running_pid, module, launch_program) = match (pid, program) {
         (Some(pid), None) => (
             Some(pid),
@@ -307,30 +291,34 @@ fn profile(
         let pid = launched.id();
         // Stop at the earliest safe point, then let capture_pid resume the
         // process only after every link and sampler is live.
-        if let Err(error) =
-            slice_ebpf::stop_process(pid).and_then(|_| slice_ebpf::wait_for_stopped(pid))
+        if let Err(error) = adapter
+            .stop_process(pid)
+            .and_then(|()| adapter.wait_for_stopped(pid))
         {
-            let _ = slice_ebpf::kill_process(pid);
-            return Err(error);
+            let _ = adapter.kill_process(pid);
+            return Err(error.into());
         }
         let command = std::iter::once(program.display().to_string())
             .chain(args.iter().cloned())
             .collect();
         (pid, command, true, Some(launched))
     };
+    let target = adapter
+        .resolve_process_identity(pid)
+        .with_context(|| format!("resolving PID namespace identity for {pid}"))?;
     let stop_requested = Arc::new(AtomicBool::new(false));
     let stop_for_handler = Arc::clone(&stop_requested);
     let child_pid = child.as_ref().map(std::process::Child::id);
     if let Err(error) = ctrlc::set_handler(move || {
         stop_for_handler.store(true, Ordering::SeqCst);
         if let Some(child_pid) = child_pid {
-            let _ = slice_ebpf::interrupt_process(child_pid);
+            let _ = adapter.interrupt_process(child_pid);
         }
     })
     .context("installing Ctrl-C handler")
     {
         if let Some(launched) = child.as_ref() {
-            let _ = slice_ebpf::kill_process(launched.id());
+            let _ = adapter.kill_process(launched.id());
         }
         return Err(error);
     }
@@ -349,8 +337,8 @@ fn profile(
         source_file: None,
         line: None,
     };
-    let request = slice_ebpf::CaptureRequest {
-        pid,
+    let request = CaptureRequest {
+        target,
         module,
         function,
         probe_offset: selected.probe_offset,
@@ -358,29 +346,47 @@ fn profile(
         stop_requested,
         resume_after_attach,
     };
-    let profile = match slice_ebpf::capture_pid(&request)
+    let profile = match adapter
+        .capture(&request)
         .with_context(|| format!("capturing PID {pid} at {}", selected.demangled_name))
     {
         Ok(profile) => profile,
         Err(error) => {
             if let Some(launched) = child.as_ref() {
-                let _ = slice_ebpf::kill_process(launched.id());
+                let _ = adapter.kill_process(launched.id());
             }
             return Err(error);
         }
     };
+    let complete_invocations = profile
+        .invocations
+        .iter()
+        .filter(|invocation| invocation.complete && invocation.valid)
+        .count();
+    if complete_invocations == 0 {
+        bail!(
+            "capture produced no complete valid invocations ({} events, {} samples); use the attachment, transport, and identity diagnostics printed above instead of assuming the function was not reached",
+            profile.quality.events_generated,
+            profile.samples.len()
+        );
+    }
     if let Err(error) = write_profile_atomically(&profile, &output) {
         if let Some(launched) = child.as_ref() {
-            let _ = slice_ebpf::kill_process(launched.id());
+            let _ = adapter.kill_process(launched.id());
         }
         return Err(error);
     }
     if let Some(mut launched) = child.take() {
         launched.wait().context("waiting for launched target")?;
     }
+    let (on_cpu_samples, off_cpu_samples, _, off_cpu_ns) = sample_summary(&profile);
     println!(
-        "captured {} at PID {pid} -> {}",
+        "captured {} at PID {pid}: {complete_invocations} complete invocations, {} samples ({on_cpu_samples} on-CPU, {off_cpu_samples} off-CPU / {:.3} ms), {} dropped events, {} dropped samples -> {}",
         selected.demangled_name,
+        profile.samples.len(),
+        off_cpu_ns as f64 / 1e6,
+        profile.quality.events_dropped,
+        profile.quality.samples_dropped,
         output.display()
     );
     Ok(())
@@ -437,7 +443,7 @@ fn view(
     Ok(())
 }
 
-fn discover(profile_path: PathBuf) -> Result<()> {
+fn discover(profile_path: PathBuf, metric: Metric) -> Result<()> {
     let profile = Profile::read_from_path(&profile_path)?;
     profile
         .validate()
@@ -449,20 +455,43 @@ fn discover(profile_path: PathBuf) -> Result<()> {
         .collect::<std::collections::HashMap<_, _>>();
     let mut inclusive = std::collections::BTreeMap::<String, u64>::new();
     for sample in &profile.samples {
+        if !metric.includes(sample.state) {
+            continue;
+        }
         if let Some(stack) = stacks.get(&sample.stack_id) {
             for frame in &stack.frames {
                 *inclusive.entry(frame.label.clone()).or_default() += sample.weight_ns;
             }
         }
     }
-    println!("Observed functions (sampled inclusive time; discovery does not report exact p95):");
-    for (name, time) in inclusive.into_iter().rev().take(30) {
+    let (on_cpu_samples, off_cpu_samples, on_cpu_ns, off_cpu_ns) = sample_summary(&profile);
+    println!(
+        "Sample states: {on_cpu_samples} on-CPU / {:.3} ms, {off_cpu_samples} off-CPU / {:.3} ms",
+        on_cpu_ns as f64 / 1e6,
+        off_cpu_ns as f64 / 1e6
+    );
+    let metric_name = match metric {
+        Metric::Wall => "wall",
+        Metric::Cpu => "CPU",
+        Metric::OffCpu => "off-CPU",
+    };
+    println!(
+        "Observed {metric_name} functions (sampled inclusive time; discovery does not report exact p95):"
+    );
+    let mut inclusive = inclusive.into_iter().collect::<Vec<_>>();
+    inclusive.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0)));
+    for (name, time) in inclusive.into_iter().take(30) {
         println!("{:>12.3} ms  {name}", time as f64 / 1e6);
     }
     Ok(())
 }
 
-fn validate(profile_path: PathBuf, require_complete: bool, require_samples: bool) -> Result<()> {
+fn validate(
+    profile_path: PathBuf,
+    require_complete: bool,
+    require_samples: bool,
+    require_off_cpu: bool,
+) -> Result<()> {
     let profile = Profile::read_from_path(&profile_path)
         .with_context(|| format!("could not read profile {}", profile_path.display()))?;
     profile
@@ -479,109 +508,73 @@ fn validate(profile_path: PathBuf, require_complete: bool, require_samples: bool
     if require_samples && profile.samples.is_empty() {
         bail!("profile contains no samples");
     }
+    let (on_cpu_samples, off_cpu_samples, _, off_cpu_ns) = sample_summary(&profile);
+    if require_off_cpu && off_cpu_samples == 0 {
+        bail!("profile contains no off-CPU samples");
+    }
     println!(
-        "valid profile: {} invocations, {} samples, {} dropped events, {} dropped samples",
+        "valid profile: {} invocations, {} samples ({on_cpu_samples} on-CPU, {off_cpu_samples} off-CPU / {:.3} ms), {} dropped events, {} dropped samples",
         profile.invocations.len(),
         profile.samples.len(),
+        off_cpu_ns as f64 / 1e6,
         profile.quality.events_dropped,
         profile.quality.samples_dropped
     );
     Ok(())
 }
 
+fn sample_summary(profile: &Profile) -> (usize, usize, u64, u64) {
+    profile.samples.iter().fold(
+        (0, 0, 0_u64, 0_u64),
+        |(on_count, off_count, on_ns, off_ns), sample| match sample.state {
+            ExecutionState::OnCpu => (
+                on_count + 1,
+                off_count,
+                on_ns.saturating_add(sample.weight_ns),
+                off_ns,
+            ),
+            ExecutionState::OffCpu => (
+                on_count,
+                off_count + 1,
+                on_ns,
+                off_ns.saturating_add(sample.weight_ns),
+            ),
+        },
+    )
+}
+
 fn doctor() -> Result<()> {
-    let btf = std::path::Path::new("/sys/kernel/btf/vmlinux").exists();
-    let tracefs = tracepoint_status();
-    let perf = std::fs::read_to_string("/proc/sys/kernel/perf_event_paranoid")
-        .unwrap_or_else(|_| "unavailable".to_owned());
-    let unprivileged_bpf = std::fs::read_to_string("/proc/sys/kernel/unprivileged_bpf_disabled")
-        .unwrap_or_else(|_| "unavailable".to_owned());
-    let memlock = std::fs::read_to_string("/proc/self/limits")
-        .ok()
-        .and_then(|limits| {
-            limits
-                .lines()
-                .find(|line| line.starts_with("Max locked memory"))
-                .map(str::to_owned)
-        })
-        .unwrap_or_else(|| "unavailable".to_owned());
-    println!("Slice capture prerequisites");
-    println!("  architecture: {}", std::env::consts::ARCH);
-    println!(
-        "  kernel BTF: {}",
-        if btf { "available" } else { "missing" }
-    );
-    println!("  sched_switch tracepoint: {tracefs}");
-    println!("  perf_event_paranoid: {}", perf.trim());
-    println!("  unprivileged_bpf_disabled: {}", unprivileged_bpf.trim());
-    println!("  {memlock}");
-    println!(
-        "  effective CAP_BPF: {}",
-        if effective_capability(39) {
-            "yes"
-        } else {
-            "no"
+    let report = LinuxCaptureAdapter.doctor()?;
+    println!("Slice doctor (adapter: {})", report.adapter);
+    for check in &report.checks {
+        let marker = match check.status {
+            CheckStatus::Pass => "ok",
+            CheckStatus::Warning => "warn",
+            CheckStatus::Failure => "fail",
+        };
+        println!("  [{marker}] {}: {}", check.label, check.detail);
+        if let Some(remediation) = &check.remediation {
+            println!("         fix: {remediation}");
         }
-    );
+    }
+    let failures = report
+        .checks
+        .iter()
+        .filter(|check| check.status == CheckStatus::Failure)
+        .count();
+    let warnings = report
+        .checks
+        .iter()
+        .filter(|check| check.status == CheckStatus::Warning)
+        .count();
     println!(
-        "  effective CAP_PERFMON: {}",
-        if effective_capability(38) {
-            "yes"
-        } else {
-            "no"
-        }
+        "Doctor summary: {} passed, {warnings} warnings, {failures} failures",
+        report.checks.len() - warnings - failures
     );
-    println!(
-        "  effective CAP_SYS_PTRACE: {}",
-        if effective_capability(19) {
-            "yes"
-        } else {
-            "no"
-        }
-    );
-    println!(
-        "  capture requires root or CAP_BPF,CAP_PERFMON and CAP_SYS_PTRACE for unrelated --pid targets"
-    );
-    println!(
-        "  if these checks fail, the Nix shell cannot fix it; run the capture with sudo or grant the binary capabilities"
-    );
+    if report.has_failures() {
+        bail!("capture prerequisites failed; apply the fixes shown above and rerun `slice doctor`");
+    }
     Ok(())
-}
-
-fn tracepoint_status() -> &'static str {
-    let paths = [
-        "/sys/kernel/tracing/events/sched/sched_switch/format",
-        "/sys/kernel/debug/tracing/events/sched/sched_switch/format",
-    ];
-    let mut permission_denied = false;
-    for path in paths {
-        match std::fs::read_to_string(path) {
-            Ok(_) => return "available",
-            Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
-                permission_denied = true;
-            }
-            Err(_) => {}
-        }
-    }
-    if permission_denied {
-        "permission denied"
-    } else {
-        "missing"
-    }
-}
-
-fn effective_capability(bit: u32) -> bool {
-    let Ok(status) = std::fs::read_to_string("/proc/self/status") else {
-        return false;
-    };
-    let Some(value) = status
-        .lines()
-        .find_map(|line| line.strip_prefix("CapEff:\t"))
-        .and_then(|value| u64::from_str_radix(value.trim(), 16).ok())
-    else {
-        return false;
-    };
-    value & (1_u64 << bit) != 0
 }
 
 fn parse_threads(value: &str) -> Result<BTreeSet<u32>> {

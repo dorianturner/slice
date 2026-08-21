@@ -21,6 +21,9 @@ test-bpf:
 test-live:
     REQUIRE_PRIVILEGED=1 bash tests/privileged-capture.sh
 
+regenerate-bimodal:
+    bash scripts/regenerate-bimodal.sh
+
 policy:
     bash scripts/check-repository.sh
 

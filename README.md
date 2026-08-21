@@ -8,6 +8,71 @@ Slice is a Linux x86-64 percentile profiler for one focused question:
 
 > What does the call stack look like during the slowest executions of one C++ function?
 
+## Quick start: Ubuntu and WSL 2
+
+These commands support Ubuntu 22.04/24.04 on native Linux and under WSL 2 with
+a Linux 6.6 or newer kernel. Slice uses process-wide BPF uprobe-multi links so
+one attachment follows every thread in the selected process. WSL 1 cannot
+perform the eBPF capture. If WSL is not installed or is stale,
+run these commands once in an Administrator PowerShell, then reopen Ubuntu:
+
+```powershell
+wsl --install -d Ubuntu
+wsl --update
+wsl --shutdown
+```
+
+Microsoft documents the current WSL installation and update flow in its
+[WSL install guide](https://learn.microsoft.com/windows/wsl/install). Inside
+Ubuntu, install the repository build dependencies:
+
+```bash
+sudo apt update
+sudo apt install -y \
+  build-essential clang cmake ninja-build libbpf-dev libelf-dev zlib1g-dev \
+  pkg-config curl git
+```
+
+Do not add `linux-headers-$(uname -r)` on WSL. Microsoft supplies the WSL
+kernel separately, that package normally does not exist in Ubuntu's archive,
+and Slice does not require kernel headers to build.
+
+Install Rust with `rustup` if `cargo --version` is not already Rust 1.85 or
+newer. This is the [official Rust installation method](https://www.rust-lang.org/tools/install):
+
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source "$HOME/.cargo/env"
+rustup default stable
+rustup component add rustfmt clippy
+```
+
+Clone the repository and generate the real captured demo:
+
+```bash
+git clone https://github.com/dorianturner/slice.git
+cd slice
+bash scripts/regenerate-bimodal.sh
+```
+
+The script builds the release CLI and native fixture as your normal user,
+runs only `slice doctor` and `slice profile` through `sudo`, validates the
+capture, and writes:
+
+```text
+bimodal.slice
+bimodal-neo-brutalist.html
+```
+
+On WSL, open the report in the Windows default browser with:
+
+```bash
+explorer.exe "$(wslpath -w "$PWD/bimodal-neo-brutalist.html")"
+```
+
+A successful capture reports nonzero invocations and samples during
+validation. If setup fails, see [Ubuntu/WSL troubleshooting](#ubuntuwsl-troubleshooting).
+
 ## Engineering workflow
 
 The repository is designed for agent-first, gated development. Start with
@@ -24,34 +89,26 @@ self-contained HTML flame graph.
 The walkthrough below uses the `bimodal_service` fixture. It has a deterministic
 70/30 latency split with normal-shaped jitter around two distinct modes:
 
-- 70% of calls peak at 10 ms and are distributed from 2 ms to 18 ms;
-- 30% of calls peak at 20 ms and are distributed from 12 ms to 28 ms, split
-  between scheduler wait and 5 ms of CPU work, with visible overlap around
-  15 ms.
+- 70% of calls request a 10 ms CPU interval and are distributed from 2 ms to
+  18 ms;
+- 30% of calls request a 20 ms interval and are distributed from 12 ms to
+  28 ms, split between scheduler wait and 5 ms of CPU work, with visible
+  overlap around 15 ms. Both modes also perform real distribution work before
+  their timed interval.
 
-The fixture uses 9,000 synthetic invocations across ten worker threads, with
-reproducible histogram weights that are highest at each center and taper toward
-the edges. That makes the generated report a useful demo without requiring a
-privileged live capture.
+Build and capture the fixture as a real process; the profiler records its
+actual invocations and sampled stacks. The complete native workflow is
+documented in [`fixtures/README.md`](fixtures/README.md).
 
-## Demo fixture matrix
+## Native fixture matrix
 
-The repository includes deterministic workloads for the main user journeys:
+The repository includes native workloads for the main user journeys:
 
 | Scenario | Demonstrates |
 | --- | --- |
-| `tail` | p99 population filtering exposes a path hidden by aggregate time |
-| `bimodal` | overlapping latency modes, ten worker timelines, and metric switching |
-| `off-cpu` | scheduler wait attribution and an off-CPU flame graph |
-
-Generate and inspect any offline scenario without kernel privileges:
-
-```bash
-slice fixture-profile --scenario off-cpu --output off-cpu.slice
-slice validate off-cpu.slice --require-complete --require-samples
-slice discover off-cpu.slice
-slice view off-cpu.slice --metric off-cpu --output off-cpu.html
-```
+| `tail_divergence` | p99 population filtering exposes a path hidden by aggregate time |
+| `bimodal_service` | overlapping latency modes, worker timelines, and metric switching |
+| `off_cpu_wait` | scheduler wait attribution and an off-CPU flame graph |
 
 The native `nested_population` workload is a negative test for the collector:
 it deliberately creates nested selected invocations so the capture records a
@@ -61,71 +118,59 @@ selectors.
 
 ## Architecture at a glance
 
-The most important design decision is the boundary between the kernel and
-userspace: eBPF performs only small, bounded capture operations, while
-userspace owns symbolization, correlation, percentile selection, storage, and
-visualization.
+Slice uses a hexagonal ports-and-adapters boundary. The CLI orchestrates a
+platform-neutral capture port; the current Linux eBPF implementation is one
+adapter. eBPF performs only small, bounded capture operations, while userspace
+owns symbolization, correlation, percentile selection, storage, and rendering.
 
 ```mermaid
 flowchart LR
-    User["slice CLI"] --> Symbols["ELF symbol discovery<br/>demangle + exact match"]
-    User --> ProfileCmd["profile command"]
-    User --> ViewCmd["view / discover"]
+    User["User"] --> CLI["slice-cli<br/>application shell"]
 
-    ProfileCmd --> Supervisor["Optional target supervisor<br/>launch, stop, resume, Ctrl-C"]
-    ProfileCmd --> Capture["slice-ebpf<br/>userspace capture"]
-    Supervisor --> Capture
-
-    Capture --> Loader["Load BPF skeleton<br/>configure target TGID/function"]
-    Loader --> Kernel
-
-    subgraph Kernel["Linux kernel eBPF"]
-        Entry["uprobe: function entry"]
-        Return["uretprobe: function return"]
-        Sample["perf_event: periodic user stack"]
-        Sched["sched_switch: off-CPU intervals"]
-        Active["active_by_tid"]
-        Stacks["stack_traces map"]
-        OffCPU["offcpu_by_tid"]
-        Ring["ring buffer events"]
-
-        Entry --> Active
-        Return --> Active
-        Sample --> Active
-        Sample --> Stacks
-        Sched --> Active
-        Sched --> OffCPU
-        Entry --> Ring
-        Return --> Ring
-        Sample --> Ring
-        Sched --> Ring
+    subgraph Hexagon["Application and domain"]
+        Port["slice-capture<br/>CapturePort + doctor/identity contracts"]
+        Collector["slice-collector<br/>event correlation"]
+        Core["slice-core<br/>Profile + query + validation"]
+        CLI --> Port
+        Collector --> Core
     end
 
-    Ring --> Decode["Userspace event decoding"]
-    Stacks --> Resolve["ELF + /proc mapping resolver<br/>addresses → symbolized frames"]
-    Decode --> Correlator["slice-collector<br/>invocation correlator"]
-    Resolve --> Correlator
+    subgraph Inbound["Inbound platform adapter"]
+        Linux["slice-ebpf<br/>LinuxCaptureAdapter"]
+        Proc["process control + /proc identity"]
+        BPF["libbpf + perf + tracepoints"]
+        Linux --> Proc
+        Linux --> BPF
+    end
 
-    Correlator --> Profile["slice-core::Profile<br/>invocations, stacks, samples,<br/>threads, metadata, quality"]
-    Profile --> Store["Versioned .slice file<br/>JSON + zstd, atomic write"]
+    Linux -.->|implements| Port
+    Port --> Linux
+    BPF --> Kernel["Linux kernel<br/>uprobe-multi + active_by_tid<br/>sampling + sched_switch"]
+    Linux --> Collector
 
-    Store --> ViewCmd
-    ViewCmd --> Query["slice-core query engine<br/>thread/time/metric/percentile filters"]
-    Profile --> Query
-    Query --> Result["Flame tree + latency statistics"]
-    Result --> Render["slice-render"]
-    Render --> HTML["Self-contained interactive HTML"]
+    Core --> Codec[".slice v1 codec<br/>atomic file adapter"]
+    Core --> Render["slice-render<br/>HTML adapter"]
+    Codec --> Profile["bimodal.slice"]
+    Render --> HTML["offline report.html"]
+
+    Future["Future capture adapter<br/>remote / alternate backend"]
+    Future -.->|implements| Port
 ```
 
 ### Runtime flow
 
 1. `slice profile` resolves an exact demangled C++ function to an ELF address.
 2. The CLI attaches to an existing PID or launches a child, stops it before
-   the first interesting call, installs instrumentation, and resumes it.
+   the first interesting call when using the launch form, installs
+   process-wide uprobe-multi instrumentation, and resumes it. The link is
+   scoped to the process address space, so threads created after resume are
+   included and followed across CPUs without perf-event inheritance.
 3. Kernel instrumentation emits function-entry, function-return, stack-sample,
    and scheduler-wait events through a BPF ring buffer.
 4. Userspace retrieves stack IDs, resolves addresses against ELF and
-   `/proc/<pid>/maps`, and converts events into collector events.
+   `/proc/<pid>/maps`, preserves the kernel invocation IDs, and replays events
+   by kernel timestamp before converting them into collector events. Ring
+   buffer delivery order is transport detail, not profile semantics.
 5. The collector correlates events into valid invocations and deduplicated
    stacks, while recording dropped or inconsistent data in quality counters.
 6. `slice-core::Profile` becomes the stable boundary between capture, storage,
@@ -170,9 +215,8 @@ write does not replace a previously valid output file.
   instead of silently contaminating percentile results.
 - **Efficient events:** The kernel sends compact IDs and weights through the
   ring buffer; full stack resolution happens in userspace.
-- **Testability:** The collector consumes abstract events, and `slice-core`
-  provides deterministic synthetic profiles for tests and demos without a live
-  kernel capture.
+- **Testability:** The collector consumes abstract events, while native
+  fixtures exercise ELF discovery and live capture against real executables.
 - **Reproducible analysis:** Percentile selection and metric filtering happen
   offline from the captured profile, so the same `.slice` file can be queried
   repeatedly.
@@ -182,6 +226,9 @@ write does not replace a previously valid output file.
 - Linux x86-64 and C++ are currently supported.
 - The selected function must execute entirely on one thread; cross-thread and
   asynchronous handoffs are not modeled.
+- Existing-PID and launch captures use process-scoped uprobe-multi links, so
+  existing and later-created threads sharing the target address space are
+  included.
 - Nested invocations of the selected function are invalidated rather than
   modeled as a full invocation tree.
 - Sampling is statistical, so extremely short work can be underrepresented.
@@ -215,9 +262,10 @@ crates:
 
 | Crate | Responsibility |
 | --- | --- |
-| `slice-core` | Profile format, data model, percentile query engine, synthetic profiles |
+| `slice-core` | Profile format, data model, and percentile query engine |
+| `slice-capture` | Platform-neutral capture, doctor, identity, and error ports |
 | `slice-collector` | Correlates raw capture events into invocations and samples |
-| `slice-ebpf` | Loads BPF, attaches probes, reads ring-buffer events, resolves stacks |
+| `slice-ebpf` | Linux capture adapter: process control, doctor checks, BPF transport, and stack resolution |
 | `slice-render` | Generates the interactive self-contained HTML viewer |
 | `slice-cli` | User-facing commands and capture/view orchestration |
 
@@ -265,7 +313,10 @@ graph.
 
 `sched_switch` is a Linux tracepoint emitted when the scheduler switches tasks.
 Slice watches it to detect when an active invocation is descheduled and when
-it resumes. The interval between those events becomes an off-CPU sample.
+it resumes. The interval between those events becomes an off-CPU sample, using
+the blocked user stack captured at switch-out. The Linux adapter explicitly
+bridges tracepoint TIDs to BPF-helper TIDs because those namespaces can differ
+under WSL.
 
 This is why the viewer can compare:
 
@@ -278,9 +329,11 @@ This is why the viewer can compare:
 Slice uses several BPF maps:
 
 - `active_by_tid`: current selected invocation for each thread;
-- `offcpu_by_tid`: timestamp at which an active thread was descheduled;
+- `offcpu_by_tid`: timestamp and user stack captured when an active thread was
+  descheduled;
+- scheduler identity maps: tracepoint TID to/from BPF-helper TID;
 - `stack_traces`: deduplicated kernel-side storage for user stack addresses;
-- `config`: target TGID, function ID, and sampling period;
+- `config`: selected function ID and sampling period;
 - counters for dropped events and samples.
 
 The ring buffer carries fixed-width event records. The event contains IDs,
@@ -320,13 +373,21 @@ percentile window. Drag across the histogram body to draw a latency range, drag
 the upper rail to move the existing range, and use the percentile fields for
 exact values. The Bucket control in the histogram header switches between
 automatic binning and fixed widths from 0.25 ms through 5 ms. The generated
-report is self-contained and can be opened directly from the filesystem.
+report is self-contained and can be opened directly from the filesystem. Hover
+over a bucket to see its latency interval and invocation-sample count.
 
 The flame graph is built from sampled user stacks for the selected invocations
 and metric. It starts at the named population function and includes recorded
 descendants; it cannot show code that was never sampled or was inlined by the
 compiler. Use --percentile 0:100 when the report should include the complete
 invocation population rather than only a tail.
+
+The native bimodal fixture makes that observation practical: its real
+`normal_distribution()` helper performs 65,536 `std::normal_distribution` draws
+per request and remains out of line, while `spin_for()` remains out of line as
+well. Regenerate the inspectable report with
+`just regenerate-bimodal`; the command requires live capture privileges
+and writes only a real captured profile.
 
 ### CMake, Ninja, optional Nix, and Linux kernel facilities
 
@@ -363,13 +424,14 @@ Slice currently targets 64-bit Linux. The commands below are written for
 Ubuntu 22.04 or 24.04 and should be straightforward to adapt to other
 distributions.
 
-Install the native, BPF, and Rust build dependencies:
+Install the native, BPF, and Rust build dependencies. The list deliberately
+omits kernel headers so the same command works on WSL 2:
 
 ```bash
 sudo apt update
 sudo apt install -y \
-  build-essential clang llvm libclang-dev libbpf-dev libelf-dev zlib1g-dev \
-  pkg-config cmake ninja-build linux-headers-$(uname -r) curl git
+  build-essential clang cmake ninja-build libbpf-dev libelf-dev zlib1g-dev \
+  pkg-config curl git
 ```
 
 Install Rust 1.85 or newer with `rustup` if it is not already available:
@@ -378,6 +440,7 @@ Install Rust 1.85 or newer with `rustup` if it is not already available:
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 source "$HOME/.cargo/env"
 rustup default stable
+rustup component add rustfmt clippy
 ```
 
 From the repository root, run the tests and build the native fixture:
@@ -388,15 +451,17 @@ cmake -S fixtures -B build/fixtures -G Ninja
 cmake --build build/fixtures
 ```
 
-Build the CLI in release mode:
+Build the CLI in release mode. `libelf-dev` and `zlib1g-dev` are required here;
+the runtime-only `libelf1` and `zlib1g` packages do not provide the linker
+names used by the vendored static libbpf build:
 
 ```bash
 cargo build --release
 ```
 
-Before a live capture, check that the running kernel exposes BTF and the
-required scheduler tracepoint. Capture generally needs root privileges because
-it uses eBPF and perf events:
+Before a live capture, check that the running Linux 6.6+ kernel exposes BTF,
+process-wide uprobe-multi links, and the required scheduler tracepoint. Capture
+generally needs root privileges because it uses eBPF and perf events:
 
 ```bash
 sudo ./target/release/slice doctor
@@ -405,6 +470,21 @@ sudo ./target/release/slice doctor
 If `slice doctor` reports missing BTF or tracefs permissions, use a distro
 kernel with BTF enabled and make sure `/sys/kernel/btf/vmlinux` and tracefs
 are mounted. The exact kernel configuration is distribution-specific.
+
+### Ubuntu/WSL troubleshooting
+
+- Confirm WSL 2 from PowerShell with `wsl -l -v`. If the kernel is older than
+  6.6, or BTF or `sched_switch` is missing, run `wsl --update` and `wsl --shutdown` from
+  PowerShell, then reopen Ubuntu and rerun `sudo ./target/release/slice doctor`.
+- Check tool provenance with `type -a cmake ninja clang cargo`. If a broken
+  private installation appears before `/usr/bin`, remove that PATH entry or
+  temporarily run `export PATH="$HOME/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"`.
+- A shell-startup error naming a missing file is not a Slice error. Find the
+  stale startup entry with `grep -n 'missing-file-name' ~/.bashrc ~/.profile`
+  and remove or correct that entry before rebuilding.
+- Run Cargo and CMake as your normal user. Use `sudo` only for `slice doctor`
+  and `slice profile`; running the build itself under `sudo` creates
+  root-owned build artifacts.
 
 ## NixOS setup
 
@@ -496,19 +576,21 @@ BimodalFixture::handle_request(unsigned long)
 
 ### 3. Capture the live workload
 
-Run Slice as the supervisor so it launches the fixture, attaches before the
-first request, and captures until you stop it:
+Launch the threaded fixture through Slice. The launch form installs a
+process-wide uprobe-multi pair before resuming the child, so worker threads
+created by the fixture are included on whichever CPU they run:
 
 ```bash
 sudo "$SLICE" profile \
+  --module build/fixtures/bimodal_service \
   --function 'BimodalFixture::handle_request(unsigned long)' \
   --output bimodal.slice \
-  build/fixtures/bimodal_service -- --workers 10
+  build/fixtures/bimodal_service -- \
+  --workers 10 --iterations 400
 ```
 
-The fixture runs continuously. Let it run for roughly 10 seconds, then press
-Ctrl-C in the profiling shell. Slice stops the child, drains pending events,
-and writes `bimodal.slice`.
+The finite fixture run exits after 400 iterations per worker. Slice drains
+pending events and writes `bimodal.slice` after the child exits.
 
 A successful run ends with a line similar to:
 
@@ -519,7 +601,15 @@ captured BimodalFixture::handle_request(unsigned long) at PID ... -> bimodal.sli
 If capture fails before that line, no usable profile was written. Fix the
 reported `slice doctor` or kernel error before trying to view the file.
 
-### 4. Render the complete capture
+### 4. Validate and render the complete capture
+
+Do not render until validation succeeds:
+
+```bash
+"$SLICE" validate bimodal.slice \
+  --require-complete --require-samples --require-off-cpu
+"$SLICE" discover bimodal.slice --metric off-cpu
+```
 
 Render the capture through the packaged CLI:
 

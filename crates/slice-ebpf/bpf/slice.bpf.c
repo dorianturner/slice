@@ -17,8 +17,8 @@ enum slice_event_kind {
 };
 
 struct slice_config {
-  __u32 target_tgid;
   __u32 function_id;
+  __u32 reserved;
   __u64 sample_period_ns;
 };
 
@@ -31,6 +31,7 @@ struct active_invocation {
 
 struct offcpu_start {
   __u64 timestamp_ns;
+  __s32 stack_id;
 };
 
 struct trace_sched_switch {
@@ -84,6 +85,24 @@ struct {
   __type(value, struct offcpu_start);
 } offcpu_by_tid SEC(".maps");
 
+// sched_switch exposes namespace-relative tracepoint TIDs, while
+// bpf_get_current_pid_tgid() can expose a different kernel identity (notably
+// under WSL). Learn the translation while the outgoing task is current, then
+// use it to correlate that task when it is scheduled back in.
+struct {
+  __uint(type, BPF_MAP_TYPE_HASH);
+  __uint(max_entries, 32768);
+  __type(key, __u32);
+  __type(value, __u32);
+} trace_tid_to_bpf_tid SEC(".maps");
+
+struct {
+  __uint(type, BPF_MAP_TYPE_HASH);
+  __uint(max_entries, 32768);
+  __type(key, __u32);
+  __type(value, __u32);
+} bpf_tid_to_trace_tid SEC(".maps");
+
 struct {
   __uint(type, BPF_MAP_TYPE_STACK_TRACE);
   __uint(max_entries, 32768);
@@ -110,14 +129,38 @@ struct {
   __type(value, __u64);
 } dropped_samples SEC(".maps");
 
-static __always_inline struct slice_config *slice_config_for_current(void) {
+// Transport diagnostics are deliberately outside the profile schema. They
+// distinguish an attachment that never fired from one whose events failed
+// before reaching userspace.
+struct {
+  __uint(type, BPF_MAP_TYPE_ARRAY);
+  __uint(max_entries, 5);
+  __type(key, __u32);
+  __type(value, __u64);
+} probe_diagnostics SEC(".maps");
+
+struct {
+  __uint(type, BPF_MAP_TYPE_ARRAY);
+  __uint(max_entries, 1);
+  __type(key, __u32);
+  __type(value, __u32);
+} observed_tgid SEC(".maps");
+
+static __always_inline void count_probe_diagnostic(__u32 key) {
+  __u64 *counter = bpf_map_lookup_elem(&probe_diagnostics, &key);
+  if (counter)
+    __sync_fetch_and_add(counter, 1);
+}
+
+static __always_inline struct slice_config *slice_config(void) {
   __u32 zero = 0;
-  struct slice_config *cfg = bpf_map_lookup_elem(&config, &zero);
-  if (!cfg)
-    return 0;
-  if ((__u32)(bpf_get_current_pid_tgid() >> 32) != cfg->target_tgid)
-    return 0;
-  return cfg;
+  return bpf_map_lookup_elem(&config, &zero);
+}
+
+static __always_inline void record_observed_tgid(void) {
+  __u32 zero = 0;
+  __u32 tgid = (__u32)(bpf_get_current_pid_tgid() >> 32);
+  bpf_map_update_elem(&observed_tgid, &zero, &tgid, BPF_ANY);
 }
 
 static __always_inline void emit(__u32 kind, __u32 tid, __u64 now,
@@ -141,11 +184,17 @@ static __always_inline void emit(__u32 kind, __u32 tid, __u64 now,
   bpf_ringbuf_submit(event, 0);
 }
 
-SEC("uprobe")
+SEC("uprobe.multi")
 int slice_entry(struct pt_regs *ctx) {
-  struct slice_config *cfg = slice_config_for_current();
+  count_probe_diagnostic(0);
+  record_observed_tgid();
+  // The uprobe-multi link is already scoped by the target process's shared
+  // address space. Do not compare namespace-relative userspace PIDs with the
+  // kernel identity returned by BPF helpers.
+  struct slice_config *cfg = slice_config();
   if (!cfg)
     return 0;
+  count_probe_diagnostic(1);
   __u32 tid = (__u32)bpf_get_current_pid_tgid();
   __u64 now = bpf_ktime_get_ns();
   if (bpf_map_lookup_elem(&active_by_tid, &tid)) {
@@ -169,9 +218,10 @@ int slice_entry(struct pt_regs *ctx) {
   return 0;
 }
 
-SEC("uretprobe")
+SEC("uretprobe.multi")
 int slice_return(struct pt_regs *ctx) {
-  if (!slice_config_for_current())
+  count_probe_diagnostic(2);
+  if (!slice_config())
     return 0;
   __u32 tid = (__u32)bpf_get_current_pid_tgid();
   struct active_invocation *active = bpf_map_lookup_elem(&active_by_tid, &tid);
@@ -182,13 +232,17 @@ int slice_return(struct pt_regs *ctx) {
   emit(SLICE_EVENT_RETURN, tid, bpf_ktime_get_ns(), active->id, -1, 0);
   bpf_map_delete_elem(&active_by_tid, &tid);
   bpf_map_delete_elem(&offcpu_by_tid, &tid);
+  __u32 *trace_tid = bpf_map_lookup_elem(&bpf_tid_to_trace_tid, &tid);
+  if (trace_tid) {
+    __u32 trace_tid_copy = *trace_tid;
+    bpf_map_delete_elem(&trace_tid_to_bpf_tid, &trace_tid_copy);
+    bpf_map_delete_elem(&bpf_tid_to_trace_tid, &tid);
+  }
   return 0;
 }
 
 SEC("perf_event")
 int slice_sample(struct bpf_perf_event_data *ctx) {
-  if (!slice_config_for_current())
-    return 0;
   __u32 tid = (__u32)bpf_get_current_pid_tgid();
   struct active_invocation *active = bpf_map_lookup_elem(&active_by_tid, &tid);
   if (!active)
@@ -201,7 +255,7 @@ int slice_sample(struct bpf_perf_event_data *ctx) {
       __sync_fetch_and_add(dropped, 1);
     return 0;
   }
-  struct slice_config *cfg = slice_config_for_current();
+  struct slice_config *cfg = slice_config();
   emit(SLICE_EVENT_SAMPLE, tid, bpf_ktime_get_ns(), active->id, stack_id,
        cfg ? cfg->sample_period_ns : 0);
   return 0;
@@ -210,24 +264,48 @@ int slice_sample(struct bpf_perf_event_data *ctx) {
 SEC("tracepoint/sched/sched_switch")
 int slice_sched_switch(struct trace_sched_switch *ctx) {
   __u64 now = bpf_ktime_get_ns();
-  __u32 prev_tid = ctx->prev_pid;
-  struct slice_config *cfg = slice_config_for_current();
-  if (cfg && bpf_map_lookup_elem(&active_by_tid, &prev_tid)) {
-    struct offcpu_start start = {.timestamp_ns = now};
-    bpf_map_update_elem(&offcpu_by_tid, &prev_tid, &start, BPF_ANY);
+  __u32 current_bpf_tid = (__u32)bpf_get_current_pid_tgid();
+  if (bpf_map_lookup_elem(&active_by_tid, &current_bpf_tid)) {
+    __u32 prev_trace_tid = ctx->prev_pid;
+    bpf_map_update_elem(&trace_tid_to_bpf_tid, &prev_trace_tid,
+                        &current_bpf_tid, BPF_ANY);
+    bpf_map_update_elem(&bpf_tid_to_trace_tid, &current_bpf_tid,
+                        &prev_trace_tid, BPF_ANY);
+    __s32 stack_id = bpf_get_stackid(ctx, &stack_traces, BPF_F_USER_STACK);
+    if (stack_id < 0) {
+      __u32 zero = 0;
+      __u64 *dropped = bpf_map_lookup_elem(&dropped_samples, &zero);
+      if (dropped)
+        __sync_fetch_and_add(dropped, 1);
+    }
+    struct offcpu_start start = {
+        .timestamp_ns = now,
+        .stack_id = stack_id,
+    };
+    bpf_map_update_elem(&offcpu_by_tid, &current_bpf_tid, &start, BPF_ANY);
+    count_probe_diagnostic(3);
   }
 
-  __u32 next_tid = ctx->next_pid;
-  struct offcpu_start *start = bpf_map_lookup_elem(&offcpu_by_tid, &next_tid);
-  struct active_invocation *active = bpf_map_lookup_elem(&active_by_tid, &next_tid);
+  __u32 next_trace_tid = ctx->next_pid;
+  __u32 *next_bpf_tid_ptr =
+      bpf_map_lookup_elem(&trace_tid_to_bpf_tid, &next_trace_tid);
+  if (!next_bpf_tid_ptr)
+    return 0;
+  __u32 next_bpf_tid = *next_bpf_tid_ptr;
+  struct offcpu_start *start =
+      bpf_map_lookup_elem(&offcpu_by_tid, &next_bpf_tid);
+  struct active_invocation *active =
+      bpf_map_lookup_elem(&active_by_tid, &next_bpf_tid);
   if (!start || !active) {
     if (!active)
-      bpf_map_delete_elem(&offcpu_by_tid, &next_tid);
+      bpf_map_delete_elem(&offcpu_by_tid, &next_bpf_tid);
     return 0;
   }
   __u64 weight = now > start->timestamp_ns ? now - start->timestamp_ns : 0;
-  emit(SLICE_EVENT_OFFCPU, next_tid, now, active->id, -1, weight);
-  bpf_map_delete_elem(&offcpu_by_tid, &next_tid);
+  emit(SLICE_EVENT_OFFCPU, next_bpf_tid, now, active->id, start->stack_id,
+       weight);
+  bpf_map_delete_elem(&offcpu_by_tid, &next_bpf_tid);
+  count_probe_diagnostic(4);
   return 0;
 }
 

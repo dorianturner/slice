@@ -96,10 +96,10 @@
           ctest --test-dir build --output-on-failure
           ${self.packages.${system}.default}/bin/slice symbols build/bimodal_service --match handle_request \
             | grep -F $'\tBimodalFixture::handle_request(unsigned long)'
-          ${self.packages.${system}.default}/bin/slice fixture-profile --scenario bimodal --output bimodal.slice
-          ${self.packages.${system}.default}/bin/slice view bimodal.slice --output bimodal.html --percentile 95:100
-          grep -F 'id="timeline"' bimodal.html
-          grep -F 'BimodalFixture::slow_path()' bimodal.html
+          ${self.packages.${system}.default}/bin/slice symbols build/bimodal_service --match normal_distribution \
+            | grep -F $'\tBimodalFixture::normal_distribution'
+          ${self.packages.${system}.default}/bin/slice symbols build/bimodal_service --match spin_for \
+            | grep -F $'\tBimodalFixture::spin_for'
           touch $out
         '';
       };
