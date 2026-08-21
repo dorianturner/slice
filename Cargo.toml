@@ -23,7 +23,7 @@ assert_cmd = "2.0.16"
 clap = { version = "4.5.51", features = ["derive"] }
 ctrlc = "3.4.7"
 cpp_demangle = "0.5.0"
-object = { version = "0.37.3", features = ["read_core", "elf"] }
+object = { version = "0.40.0", features = ["read_core", "elf"] }
 predicates = "3.1.3"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
