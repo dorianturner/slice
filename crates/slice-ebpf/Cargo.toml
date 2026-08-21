@@ -10,7 +10,7 @@ build = "build.rs"
 anyhow.workspace = true
 cpp_demangle.workspace = true
 libc = "0.2.189"
-libbpf-rs = { version = "0.26.2" }
+libbpf-rs = { version = "0.27.0" }
 object.workspace = true
 slice-capture = { path = "../slice-capture" }
 slice-collector = { path = "../slice-collector" }
