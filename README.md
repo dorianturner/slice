@@ -86,6 +86,12 @@ This POC attaches to one exact demangled ELF function, records its invocations
 and sampled user stacks, and renders percentile-conditioned results as a
 self-contained HTML flame graph.
 
+For repository orientation, read [the architecture contract](ARCHITECTURE.md)
+first, then use [the engineering knowledge map](docs/index.md) to find the
+testing, security, viewer, fixture, and execution-plan details. The root
+README is the user-facing capture guide; the linked documents are the
+authoritative engineering contracts.
+
 The walkthrough below uses the `bimodal_service` fixture. It has a deterministic
 70/30 latency split with normal-shaped jitter around two distinct modes:
 
@@ -125,36 +131,16 @@ owns symbolization, correlation, percentile selection, storage, and rendering.
 
 ```mermaid
 flowchart LR
-    User["User"] --> CLI["slice-cli<br/>application shell"]
-
-    subgraph Hexagon["Application and domain"]
-        Port["slice-capture<br/>CapturePort + doctor/identity contracts"]
-        Collector["slice-collector<br/>event correlation"]
-        Core["slice-core<br/>Profile + query + validation"]
-        CLI --> Port
-        Collector --> Core
-    end
-
-    subgraph Inbound["Inbound platform adapter"]
-        Linux["slice-ebpf<br/>LinuxCaptureAdapter"]
-        Proc["process control + /proc identity"]
-        BPF["libbpf + perf + tracepoints"]
-        Linux --> Proc
-        Linux --> BPF
-    end
-
-    Linux -.->|implements| Port
-    Port --> Linux
-    BPF --> Kernel["Linux kernel<br/>uprobe-multi + active_by_tid<br/>sampling + sched_switch"]
-    Linux --> Collector
-
-    Core --> Codec[".slice v1 codec<br/>atomic file adapter"]
-    Core --> Render["slice-render<br/>HTML adapter"]
-    Codec --> Profile["bimodal.slice"]
-    Render --> HTML["offline report.html"]
-
-    Future["Future capture adapter<br/>remote / alternate backend"]
-    Future -.->|implements| Port
+    User["user"] --> CLI["slice-cli<br/>application shell"]
+    CLI -->|capture request| Port["slice-capture<br/>CapturePort"]
+    Port -. implemented by .-> Linux["slice-ebpf<br/>LinuxCaptureAdapter"]
+    Linux -->|BPF events + identity data| Collector["slice-collector<br/>event correlation"]
+    Linux --> Kernel["Linux kernel<br/>uprobe-multi + perf + sched_switch"]
+    Collector -->|validated invocations and samples| Core["slice-core<br/>Profile + query + validation"]
+    CLI -->|offline query| Core
+    Core --> Store[".slice v1<br/>atomic compressed profile"]
+    Core --> Render["slice-render<br/>self-contained HTML"]
+    Future["future capture adapter"] -. implements .-> Port
 ```
 
 ### Runtime flow
@@ -385,9 +371,9 @@ invocation population rather than only a tail.
 The native bimodal fixture makes that observation practical: its real
 `normal_distribution()` helper performs 65,536 `std::normal_distribution` draws
 per request and remains out of line, while `spin_for()` remains out of line as
-well. Regenerate the inspectable report with
-`just regenerate-bimodal`; the command requires live capture privileges
-and writes only a real captured profile.
+well. Regenerate the inspectable report with `just regenerate-bimodal`; the
+command requires live capture privileges and writes only a real captured
+profile.
 
 ### CMake, Ninja, optional Nix, and Linux kernel facilities
 

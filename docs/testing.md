@@ -11,7 +11,7 @@ reproducibility check, but the local test loop does not require it.
 | Rust | `just lint` / `just test` | Warnings and deterministic unit/integration behavior |
 | BPF | `just test-bpf` | Compile the kernel program with warnings as errors |
 | Native | `just test-native` | Build C++ fixtures and test ELF symbol discovery |
-| Viewer | `SLICE_VIEW_PROFILE=path/to/capture.slice just test-viewer` and `cargo test -p slice-cli` | Render and execute a report from a real capture; without `SLICE_VIEW_PROFILE`, the smoke script reports an explicit skip |
+| Viewer | `SLICE_VIEW_PROFILE=path/to/capture.slice just test-viewer` and `cargo test -p slice-cli` | Render and execute a report from a real capture; `just check` runs the smoke script without a profile and therefore records an explicit skip |
 | Nix | `nix flake check -L` | Reproducible package and declared flake checks |
 | Live capture | `just test-live` | Required only on the privileged ephemeral runner |
 
