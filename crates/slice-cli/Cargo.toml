@@ -15,6 +15,7 @@ clap.workspace = true
 ctrlc.workspace = true
 cpp_demangle.workspace = true
 object.workspace = true
+slice-capture = { path = "../slice-capture" }
 slice-core = { path = "../slice-core" }
 slice-render = { path = "../slice-render" }
 slice-ebpf = { path = "../slice-ebpf" }

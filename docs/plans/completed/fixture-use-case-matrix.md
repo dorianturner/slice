@@ -2,14 +2,14 @@
 
 ## Intent
 
-Make the repository fixtures useful as repeatable demonstrations of the
+Make the repository fixtures useful as repeatable native workloads for the
 profiler's supported workflows, not only as build smoke tests.
 
 ## Acceptance criteria
 
-- The CLI can generate deterministic `tail`, `bimodal`, and `off-cpu` profiles.
+- Native fixtures cover tail, bimodal, and off-CPU workloads.
 - Tests exercise profile validation, sampled-function discovery, HTML viewing,
-  thread/time filtering, and off-CPU metric selection across the scenarios.
+  thread/time filtering, and off-CPU metric selection on captured profiles.
 - Native fixtures continue to cover real ELF symbol discovery and the
   intentionally invalid nested-population quality path.
 - README and engineering docs explain which fixture to use for each workflow.

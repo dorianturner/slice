@@ -556,483 +556,6 @@ pub fn percentile_r7(sorted_durations: &[u64], percentile: f64) -> Option<f64> {
     Some(low + (high - low) * fraction)
 }
 
-/// A deterministic, compact profile matching the native tail-divergence fixture.
-/// Aggregate sampled time is split exactly 50/50 between the fast and slow paths;
-/// p99:p100 selects only the slow path.
-pub fn tail_divergence_profile() -> Profile {
-    let work = 1;
-    let fast = 2;
-    let slow = 3;
-    let fast_stack = 10;
-    let slow_stack = 11;
-    let mut invocations = Vec::new();
-    let mut samples = Vec::new();
-    let mut start_ns = 0_u64;
-    for id in 1..=100_u64 {
-        let is_tail = id == 100;
-        let duration_ns = if is_tail { 297_000_000 } else { 3_000_000 };
-        let stack_id = if is_tail { slow_stack } else { fast_stack };
-        invocations.push(Invocation {
-            id,
-            function_id: work,
-            parent_id: None,
-            tid: 4242,
-            start_ns,
-            end_ns: start_ns + duration_ns,
-            complete: true,
-            valid: true,
-        });
-        samples.push(Sample {
-            timestamp_ns: start_ns + duration_ns / 2,
-            invocation_id: id,
-            stack_id,
-            tid: 4242,
-            cpu: 0,
-            state: ExecutionState::OnCpu,
-            weight_ns: duration_ns,
-        });
-        start_ns += duration_ns;
-    }
-
-    Profile {
-        format_version: 1,
-        metadata: Metadata {
-            captured_at_unix_ns: 0,
-            command: vec!["fixtures/tail_divergence".to_owned()],
-            kernel_release: "synthetic-test-profile".to_owned(),
-            sample_period_ns: 1_000_000,
-        },
-        functions: vec![
-            Function {
-                id: work,
-                module: "fixtures/tail_divergence".to_owned(),
-                module_build_id: Some("synthetic".to_owned()),
-                address: 0x401000,
-                name: "_ZN12SliceFixture4workEj".to_owned(),
-                demangled_name: "SliceFixture::work(unsigned int)".to_owned(),
-                source_file: Some("fixtures/tail_divergence.cpp".to_owned()),
-                line: Some(42),
-            },
-            Function {
-                id: fast,
-                module: "fixtures/tail_divergence".to_owned(),
-                module_build_id: Some("synthetic".to_owned()),
-                address: 0x401100,
-                name: "_ZN12SliceFixture16fast_aggregate_aEv".to_owned(),
-                demangled_name: "SliceFixture::fast_aggregate_a()".to_owned(),
-                source_file: Some("fixtures/tail_divergence.cpp".to_owned()),
-                line: Some(21),
-            },
-            Function {
-                id: slow,
-                module: "fixtures/tail_divergence".to_owned(),
-                module_build_id: Some("synthetic".to_owned()),
-                address: 0x401200,
-                name: "_ZN12SliceFixture11slow_tail_bEv".to_owned(),
-                demangled_name: "SliceFixture::slow_tail_b()".to_owned(),
-                source_file: Some("fixtures/tail_divergence.cpp".to_owned()),
-                line: Some(28),
-            },
-        ],
-        threads: vec![Thread {
-            tid: 4242,
-            name: Some("fixture-worker".to_owned()),
-        }],
-        invocations,
-        stacks: vec![
-            Stack {
-                id: fast_stack,
-                frames: vec![
-                    frame(work, "SliceFixture::work(unsigned int)"),
-                    frame(fast, "SliceFixture::fast_aggregate_a()"),
-                ],
-            },
-            Stack {
-                id: slow_stack,
-                frames: vec![
-                    frame(work, "SliceFixture::work(unsigned int)"),
-                    frame(slow, "SliceFixture::slow_tail_b()"),
-                ],
-            },
-        ],
-        samples,
-        quality: CaptureQuality {
-            events_generated: 200,
-            samples_generated: 100,
-            complete_invocations: 100,
-            ..CaptureQuality::default()
-        },
-    }
-}
-
-/// A deterministic multi-threaded profile with a visible 70/30 latency split.
-/// Each mode uses the same deterministic, normal-shaped set of histogram bins
-/// centered at 10ms or 20ms. The fast mode spans 2ms..18ms and the slow mode
-/// spans 12ms..28ms, leaving a visible overlap around the middle. The slow
-/// population contains both CPU and off-CPU work so the viewer can demonstrate
-/// all three metrics without requiring a privileged capture.
-pub fn bimodal_profile() -> Profile {
-    let work = 1;
-    let fast = 2;
-    let slow = 3;
-    let wait = 4;
-    let fast_stack = 20;
-    let slow_cpu_stack = 21;
-    let slow_wait_stack = 22;
-    let mut invocations = Vec::new();
-    let mut samples = Vec::new();
-    let mut invocation_id = 1_u64;
-    const NORMAL_BINS_NS: [(i64, u64); 17] = [
-        (-8_000_000, 1),
-        (-7_000_000, 1),
-        (-6_000_000, 2),
-        (-5_000_000, 3),
-        (-4_000_000, 5),
-        (-3_000_000, 7),
-        (-2_000_000, 9),
-        (-1_000_000, 11),
-        (0, 12),
-        (1_000_000, 11),
-        (2_000_000, 9),
-        (3_000_000, 7),
-        (4_000_000, 5),
-        (5_000_000, 3),
-        (6_000_000, 2),
-        (7_000_000, 1),
-        (8_000_000, 1),
-    ];
-
-    for (thread_index, tid) in [
-        7101_u32, 7102, 7103, 7104, 7105, 7106, 7107, 7108, 7109, 7110,
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        let mut start_ns = thread_index as u64 * 100_000;
-        for &(mode_offset_ns, bin_repetitions) in &NORMAL_BINS_NS {
-            for _ in 0..bin_repetitions {
-                for mode_ordinal in 0..10_u64 {
-                    let is_slow = mode_ordinal >= 7;
-                    let mode_center_ns = if is_slow { 20_000_000 } else { 10_000_000 };
-                    let duration_ns = (mode_center_ns as i64 + mode_offset_ns) as u64;
-                    let cpu_ns = if is_slow { 5_000_000 } else { duration_ns };
-                    let off_cpu_ns = duration_ns.saturating_sub(cpu_ns);
-                    let invocation = Invocation {
-                        id: invocation_id,
-                        function_id: work,
-                        parent_id: None,
-                        tid,
-                        start_ns,
-                        end_ns: start_ns + duration_ns,
-                        complete: true,
-                        valid: true,
-                    };
-                    invocations.push(invocation);
-                    let (stack_id, timestamp_ns) = if is_slow {
-                        (slow_cpu_stack, start_ns + off_cpu_ns + cpu_ns / 2)
-                    } else {
-                        (fast_stack, start_ns + cpu_ns / 2)
-                    };
-                    samples.push(Sample {
-                        timestamp_ns,
-                        invocation_id,
-                        stack_id,
-                        tid,
-                        cpu: thread_index as u32,
-                        state: ExecutionState::OnCpu,
-                        weight_ns: cpu_ns,
-                    });
-                    if is_slow {
-                        samples.push(Sample {
-                            timestamp_ns: start_ns + off_cpu_ns / 2,
-                            invocation_id,
-                            stack_id: slow_wait_stack,
-                            tid,
-                            cpu: thread_index as u32,
-                            state: ExecutionState::OffCpu,
-                            weight_ns: off_cpu_ns,
-                        });
-                    }
-                    invocation_id += 1;
-                    start_ns += duration_ns + 1_000_000;
-                }
-            }
-        }
-    }
-
-    Profile {
-        format_version: 1,
-        metadata: Metadata {
-            captured_at_unix_ns: 0,
-            command: vec!["fixtures/bimodal_service".to_owned()],
-            kernel_release: "synthetic-bimodal-profile".to_owned(),
-            sample_period_ns: 1_001_001,
-        },
-        functions: vec![
-            Function {
-                id: work,
-                module: "fixtures/bimodal_service".to_owned(),
-                module_build_id: Some("synthetic".to_owned()),
-                address: 0x401000,
-                name: "_ZN14BimodalFixture14handle_requestEm".to_owned(),
-                demangled_name: "BimodalFixture::handle_request(unsigned long)".to_owned(),
-                source_file: Some("fixtures/bimodal_service.cpp".to_owned()),
-                line: Some(54),
-            },
-            Function {
-                id: fast,
-                module: "fixtures/bimodal_service".to_owned(),
-                module_build_id: Some("synthetic".to_owned()),
-                address: 0x401100,
-                name: "_ZN14BimodalFixture9fast_pathEv".to_owned(),
-                demangled_name: "BimodalFixture::fast_path()".to_owned(),
-                source_file: Some("fixtures/bimodal_service.cpp".to_owned()),
-                line: Some(35),
-            },
-            Function {
-                id: slow,
-                module: "fixtures/bimodal_service".to_owned(),
-                module_build_id: Some("synthetic".to_owned()),
-                address: 0x401200,
-                name: "_ZN14BimodalFixture9slow_pathEv".to_owned(),
-                demangled_name: "BimodalFixture::slow_path()".to_owned(),
-                source_file: Some("fixtures/bimodal_service.cpp".to_owned()),
-                line: Some(42),
-            },
-            Function {
-                id: wait,
-                module: "fixtures/bimodal_service".to_owned(),
-                module_build_id: Some("synthetic".to_owned()),
-                address: 0x401300,
-                name: "nanosleep".to_owned(),
-                demangled_name: "std::this_thread::sleep_for(...)".to_owned(),
-                source_file: None,
-                line: None,
-            },
-        ],
-        threads: [
-            7101_u32, 7102, 7103, 7104, 7105, 7106, 7107, 7108, 7109, 7110,
-        ]
-        .into_iter()
-        .enumerate()
-        .map(|(index, tid)| Thread {
-            tid,
-            name: Some(format!("slice-worker-{}", index + 1)),
-        })
-        .collect(),
-        invocations,
-        stacks: vec![
-            Stack {
-                id: fast_stack,
-                frames: vec![
-                    frame_with_module(
-                        work,
-                        "BimodalFixture::handle_request(unsigned long)",
-                        "fixtures/bimodal_service",
-                    ),
-                    frame_with_module(
-                        fast,
-                        "BimodalFixture::fast_path()",
-                        "fixtures/bimodal_service",
-                    ),
-                ],
-            },
-            Stack {
-                id: slow_cpu_stack,
-                frames: vec![
-                    frame_with_module(
-                        work,
-                        "BimodalFixture::handle_request(unsigned long)",
-                        "fixtures/bimodal_service",
-                    ),
-                    frame_with_module(
-                        slow,
-                        "BimodalFixture::slow_path()",
-                        "fixtures/bimodal_service",
-                    ),
-                ],
-            },
-            Stack {
-                id: slow_wait_stack,
-                frames: vec![
-                    frame_with_module(
-                        work,
-                        "BimodalFixture::handle_request(unsigned long)",
-                        "fixtures/bimodal_service",
-                    ),
-                    frame_with_module(
-                        slow,
-                        "BimodalFixture::slow_path()",
-                        "fixtures/bimodal_service",
-                    ),
-                    frame_with_module(wait, "std::this_thread::sleep_for(...)", "libstdc++.so"),
-                ],
-            },
-        ],
-        samples,
-        quality: CaptureQuality {
-            events_generated: 18_000,
-            samples_generated: 11_700,
-            complete_invocations: 9_000,
-            ..CaptureQuality::default()
-        },
-    }
-}
-
-/// A deterministic two-thread profile for comparing CPU, off-CPU, and wall
-/// metrics. Each invocation spends 2ms on CPU and the rest waiting, with
-/// alternating 20ms and 40ms wall durations like the native `off_cpu_wait`
-/// workload.
-pub fn off_cpu_profile() -> Profile {
-    let work = 1;
-    let cpu = 2;
-    let wait = 3;
-    let on_cpu_stack = 30;
-    let off_cpu_stack = 31;
-    let tids = [7201_u32, 7202_u32];
-    let mut invocations = Vec::new();
-    let mut samples = Vec::new();
-    let mut invocation_id = 1_u64;
-
-    for (thread_index, tid) in tids.into_iter().enumerate() {
-        let mut start_ns = thread_index as u64 * 500_000;
-        for call_index in 0..8_u64 {
-            let duration_ns = if call_index % 2 == 0 {
-                20_000_000
-            } else {
-                40_000_000
-            };
-            let cpu_ns = 2_000_000;
-            let off_cpu_ns = duration_ns - cpu_ns;
-            invocations.push(Invocation {
-                id: invocation_id,
-                function_id: work,
-                parent_id: None,
-                tid,
-                start_ns,
-                end_ns: start_ns + duration_ns,
-                complete: true,
-                valid: true,
-            });
-            samples.push(Sample {
-                timestamp_ns: start_ns + cpu_ns / 2,
-                invocation_id,
-                stack_id: on_cpu_stack,
-                tid,
-                cpu: thread_index as u32,
-                state: ExecutionState::OnCpu,
-                weight_ns: cpu_ns,
-            });
-            samples.push(Sample {
-                timestamp_ns: start_ns + cpu_ns + off_cpu_ns / 2,
-                invocation_id,
-                stack_id: off_cpu_stack,
-                tid,
-                cpu: thread_index as u32,
-                state: ExecutionState::OffCpu,
-                weight_ns: off_cpu_ns,
-            });
-            invocation_id += 1;
-            start_ns += duration_ns + 2_000_000;
-        }
-    }
-
-    Profile {
-        format_version: 1,
-        metadata: Metadata {
-            captured_at_unix_ns: 0,
-            command: vec!["fixtures/off_cpu_wait".to_owned()],
-            kernel_release: "synthetic-off-cpu-profile".to_owned(),
-            sample_period_ns: 1_000_000,
-        },
-        functions: vec![
-            Function {
-                id: work,
-                module: "fixtures/off_cpu_wait".to_owned(),
-                module_build_id: Some("synthetic".to_owned()),
-                address: 0x401000,
-                name: "_ZN12SliceFixture11sleep_workEj".to_owned(),
-                demangled_name: "SliceFixture::sleep_work(unsigned int)".to_owned(),
-                source_file: Some("fixtures/off_cpu_wait.cpp".to_owned()),
-                line: Some(17),
-            },
-            Function {
-                id: cpu,
-                module: "fixtures/off_cpu_wait".to_owned(),
-                module_build_id: Some("synthetic".to_owned()),
-                address: 0x401100,
-                name: "_ZN12SliceFixture11cpu_preludeEv".to_owned(),
-                demangled_name: "SliceFixture::cpu_prelude()".to_owned(),
-                source_file: Some("fixtures/off_cpu_wait.cpp".to_owned()),
-                line: Some(10),
-            },
-            Function {
-                id: wait,
-                module: "libstdc++.so".to_owned(),
-                module_build_id: Some("synthetic".to_owned()),
-                address: 0,
-                name: "nanosleep".to_owned(),
-                demangled_name: "std::this_thread::sleep_for(...)".to_owned(),
-                source_file: None,
-                line: None,
-            },
-        ],
-        threads: tids
-            .into_iter()
-            .enumerate()
-            .map(|(index, tid)| Thread {
-                tid,
-                name: Some(format!("wait-worker-{}", index + 1)),
-            })
-            .collect(),
-        invocations,
-        stacks: vec![
-            Stack {
-                id: on_cpu_stack,
-                frames: vec![
-                    frame_with_module(
-                        work,
-                        "SliceFixture::sleep_work(unsigned int)",
-                        "fixtures/off_cpu_wait",
-                    ),
-                    frame_with_module(cpu, "SliceFixture::cpu_prelude()", "fixtures/off_cpu_wait"),
-                ],
-            },
-            Stack {
-                id: off_cpu_stack,
-                frames: vec![
-                    frame_with_module(
-                        work,
-                        "SliceFixture::sleep_work(unsigned int)",
-                        "fixtures/off_cpu_wait",
-                    ),
-                    frame_with_module(wait, "std::this_thread::sleep_for(...)", "libstdc++.so"),
-                ],
-            },
-        ],
-        samples,
-        quality: CaptureQuality {
-            events_generated: 48,
-            samples_generated: 32,
-            complete_invocations: 16,
-            ..CaptureQuality::default()
-        },
-    }
-}
-
-fn frame(function_id: u32, label: &str) -> Frame {
-    frame_with_module(function_id, label, "fixtures/tail_divergence")
-}
-
-fn frame_with_module(function_id: u32, label: &str, module: &str) -> Frame {
-    Frame {
-        function_id: Some(function_id),
-        label: label.to_owned(),
-        module: Some(module.to_owned()),
-        address: None,
-    }
-}
-
 #[derive(Debug, Eq, PartialEq, Error)]
 pub enum ProfileValidationError {
     #[error("unsupported Slice profile version {0}")]
@@ -1103,30 +626,133 @@ mod tests {
         }
     }
 
-    #[test]
-    fn aggregate_hides_the_tail_but_p99_reveals_it() {
-        let profile = tail_divergence_profile();
-        let aggregate = execute_query(&profile, &query(PercentileRange::ALL)).unwrap();
-        assert_eq!(aggregate.root.children[0].children.len(), 2);
-        let fast = &aggregate.root.children[0].children[0];
-        let slow = &aggregate.root.children[0].children[1];
-        assert_eq!(
-            fast.value_ns, slow.value_ns,
-            "aggregate paths must look equally costly"
-        );
-
-        let tail = execute_query(&profile, &query(PercentileRange { low: 99, high: 100 })).unwrap();
-        assert_eq!(tail.selected_invocation_ids, vec![100]);
-        assert_eq!(tail.root.children[0].children.len(), 1);
-        assert_eq!(
-            tail.root.children[0].children[0].name,
-            "SliceFixture::slow_tail_b()"
-        );
+    fn profile() -> Profile {
+        let frame = |label: &str| Frame {
+            function_id: None,
+            label: label.to_owned(),
+            module: Some("test-module".to_owned()),
+            address: None,
+        };
+        Profile {
+            format_version: 1,
+            metadata: Metadata {
+                captured_at_unix_ns: 1,
+                command: vec!["test-program".to_owned()],
+                kernel_release: "test-kernel".to_owned(),
+                sample_period_ns: 1_000_000,
+            },
+            functions: vec![Function {
+                id: 1,
+                module: "test-module".to_owned(),
+                module_build_id: Some("test-build".to_owned()),
+                address: 0x1000,
+                name: "work".to_owned(),
+                demangled_name: "Test::work()".to_owned(),
+                source_file: None,
+                line: None,
+            }],
+            threads: vec![
+                Thread {
+                    tid: 10,
+                    name: Some("worker-a".to_owned()),
+                },
+                Thread {
+                    tid: 11,
+                    name: Some("worker-b".to_owned()),
+                },
+            ],
+            invocations: vec![
+                Invocation {
+                    id: 1,
+                    function_id: 1,
+                    parent_id: None,
+                    tid: 10,
+                    start_ns: 0,
+                    end_ns: 10_000_000,
+                    complete: true,
+                    valid: true,
+                },
+                Invocation {
+                    id: 2,
+                    function_id: 1,
+                    parent_id: None,
+                    tid: 10,
+                    start_ns: 20_000_000,
+                    end_ns: 40_000_000,
+                    complete: true,
+                    valid: true,
+                },
+                Invocation {
+                    id: 3,
+                    function_id: 1,
+                    parent_id: None,
+                    tid: 11,
+                    start_ns: 50_000_000,
+                    end_ns: 80_000_000,
+                    complete: true,
+                    valid: true,
+                },
+            ],
+            stacks: vec![
+                Stack {
+                    id: 10,
+                    frames: vec![frame("Test::work()"), frame("child_a()")],
+                },
+                Stack {
+                    id: 11,
+                    frames: vec![frame("Test::work()"), frame("child_b()")],
+                },
+            ],
+            samples: vec![
+                Sample {
+                    timestamp_ns: 5_000_000,
+                    invocation_id: 1,
+                    stack_id: 10,
+                    tid: 10,
+                    cpu: 0,
+                    state: ExecutionState::OnCpu,
+                    weight_ns: 10_000_000,
+                },
+                Sample {
+                    timestamp_ns: 25_000_000,
+                    invocation_id: 2,
+                    stack_id: 11,
+                    tid: 10,
+                    cpu: 0,
+                    state: ExecutionState::OnCpu,
+                    weight_ns: 13_000_000,
+                },
+                Sample {
+                    timestamp_ns: 30_000_000,
+                    invocation_id: 2,
+                    stack_id: 11,
+                    tid: 10,
+                    cpu: 0,
+                    state: ExecutionState::OffCpu,
+                    weight_ns: 7_000_000,
+                },
+                Sample {
+                    timestamp_ns: 65_000_000,
+                    invocation_id: 3,
+                    stack_id: 11,
+                    tid: 11,
+                    cpu: 1,
+                    state: ExecutionState::OnCpu,
+                    weight_ns: 30_000_000,
+                },
+            ],
+            quality: CaptureQuality {
+                events_generated: 6,
+                samples_generated: 4,
+                complete_invocations: 3,
+                ..CaptureQuality::default()
+            },
+        }
     }
 
     #[test]
     fn query_flame_root_starts_at_selected_function() {
-        let mut profile = tail_divergence_profile();
+        let mut profile = profile();
         for stack in &mut profile.stacks {
             stack.frames.insert(
                 0,
@@ -1139,59 +765,51 @@ mod tests {
             );
         }
         let result = execute_query(&profile, &query(PercentileRange::ALL)).unwrap();
-        assert_eq!(
-            result.root.children[0].name,
-            "SliceFixture::work(unsigned int)"
-        );
+        assert_eq!(result.root.children[0].name, "Test::work()");
     }
 
     #[test]
     fn percentile_ranges_use_exact_ordinal_selection_and_r7_display_values() {
-        let profile = tail_divergence_profile();
-        let p95 = execute_query(&profile, &query(PercentileRange { low: 95, high: 100 })).unwrap();
-        assert_eq!(p95.selected_invocation_ids, vec![96, 97, 98, 99, 100]);
-        assert_eq!(p95.percentile_low_value_ns, Some(3_000_000.0));
-        assert_eq!(p95.percentile_high_value_ns, Some(297_000_000.0));
+        let result =
+            execute_query(&profile(), &query(PercentileRange { low: 33, high: 100 })).unwrap();
+        assert_eq!(result.selected_invocation_ids, vec![2, 3]);
+        assert_eq!(result.percentile_low_value_ns, Some(16_600_000.0));
+        assert_eq!(result.percentile_high_value_ns, Some(30_000_000.0));
     }
 
     #[test]
     fn thread_time_and_metric_filters_precede_percentiles() {
-        let mut profile = tail_divergence_profile();
-        profile.invocations[99].tid = 9999;
-        profile.samples[99].tid = 9999;
         let result = execute_query(
-            &profile,
+            &profile(),
             &Query {
-                function_id: 1,
-                threads: Some(BTreeSet::from([4242])),
+                threads: Some(BTreeSet::from([10])),
                 time: Some(TimeRange {
                     from_ns: 0,
-                    to_ns: 297_000_000,
+                    to_ns: 45_000_000,
                 }),
-                percentile: PercentileRange::ALL,
+                percentile: PercentileRange { low: 50, high: 100 },
                 metric: Metric::Cpu,
+                ..query(PercentileRange::ALL)
             },
         )
         .unwrap();
-        assert_eq!(result.available_invocation_count, 99);
-        assert_eq!(result.selected_invocation_ids.len(), 99);
+        assert_eq!(result.available_invocation_count, 2);
+        assert_eq!(result.selected_invocation_ids, vec![2]);
         assert_eq!(result.off_cpu_ns, 0);
     }
 
     #[test]
     fn profile_round_trip_is_versioned_and_lossless() {
-        let profile = tail_divergence_profile();
+        let profile = profile();
         let bytes = profile.to_bytes().unwrap();
         assert!(bytes.starts_with(FILE_MAGIC));
         assert_eq!(Profile::from_bytes(&bytes).unwrap(), profile);
         profile.validate().unwrap();
-        bimodal_profile().validate().unwrap();
-        off_cpu_profile().validate().unwrap();
     }
 
     #[test]
     fn profile_validation_rejects_unknown_sample_references() {
-        let mut profile = tail_divergence_profile();
+        let mut profile = profile();
         profile.samples[0].stack_id = 999;
         assert_eq!(
             profile.validate(),
@@ -1201,7 +819,7 @@ mod tests {
 
     #[test]
     fn profile_deserialization_rejects_invalid_semantic_graphs() {
-        let mut profile = tail_divergence_profile();
+        let mut profile = profile();
         profile.samples[0].stack_id = 999;
         let error = Profile::from_bytes(&profile.to_bytes().unwrap()).unwrap_err();
         assert!(matches!(
@@ -1212,7 +830,7 @@ mod tests {
 
     #[test]
     fn profile_validation_rejects_cyclic_invocation_parents() {
-        let mut profile = tail_divergence_profile();
+        let mut profile = profile();
         profile.invocations[0].parent_id = Some(profile.invocations[1].id);
         profile.invocations[1].parent_id = Some(profile.invocations[0].id);
         assert_eq!(
@@ -1223,18 +841,8 @@ mod tests {
 
     #[test]
     fn wall_cpu_and_off_cpu_metrics_use_their_documented_weights() {
-        let mut profile = tail_divergence_profile();
-        profile.samples.push(Sample {
-            timestamp_ns: 2_000_000,
-            invocation_id: 1,
-            stack_id: 10,
-            tid: 4242,
-            cpu: 0,
-            state: ExecutionState::OffCpu,
-            weight_ns: 7_000_000,
-        });
         let cpu = execute_query(
-            &profile,
+            &profile(),
             &Query {
                 metric: Metric::Cpu,
                 ..query(PercentileRange::ALL)
@@ -1242,7 +850,7 @@ mod tests {
         )
         .unwrap();
         let off_cpu = execute_query(
-            &profile,
+            &profile(),
             &Query {
                 metric: Metric::OffCpu,
                 ..query(PercentileRange::ALL)
@@ -1250,129 +858,17 @@ mod tests {
         )
         .unwrap();
         let wall = execute_query(
-            &profile,
+            &profile(),
             &Query {
                 metric: Metric::Wall,
                 ..query(PercentileRange::ALL)
             },
         )
         .unwrap();
-        assert_eq!(cpu.root.value_ns, 594_000_000);
+        assert_eq!(cpu.root.value_ns, 53_000_000);
         assert_eq!(off_cpu.root.value_ns, 7_000_000);
-        assert_eq!(wall.root.value_ns, 601_000_000);
+        assert_eq!(wall.root.value_ns, 60_000_000);
         assert_eq!(wall.sampled_cpu_ns, cpu.sampled_cpu_ns);
         assert_eq!(wall.off_cpu_ns, off_cpu.off_cpu_ns);
-    }
-
-    #[test]
-    fn bimodal_profile_exposes_two_latency_modes_and_slow_tail() {
-        let profile = bimodal_profile();
-        let all = execute_query(&profile, &query(PercentileRange::ALL)).unwrap();
-        let tail = execute_query(&profile, &query(PercentileRange { low: 95, high: 100 })).unwrap();
-        assert_eq!(all.available_invocation_count, 9_000);
-        assert_eq!(all.latency_min_ns, Some(2_000_000));
-        assert_eq!(all.latency_max_ns, Some(28_000_000));
-        assert_eq!(tail.selected_invocation_ids.len(), 450);
-        let fast_max = profile
-            .invocations
-            .iter()
-            .filter(|invocation| {
-                profile
-                    .samples
-                    .iter()
-                    .any(|sample| sample.invocation_id == invocation.id && sample.stack_id == 20)
-            })
-            .map(Invocation::duration_ns)
-            .max()
-            .unwrap();
-        let slow_min = profile
-            .invocations
-            .iter()
-            .filter(|invocation| {
-                profile
-                    .samples
-                    .iter()
-                    .any(|sample| sample.invocation_id == invocation.id && sample.stack_id == 21)
-            })
-            .map(Invocation::duration_ns)
-            .min()
-            .unwrap();
-        let slow_max = profile
-            .invocations
-            .iter()
-            .filter(|invocation| {
-                profile
-                    .samples
-                    .iter()
-                    .any(|sample| sample.invocation_id == invocation.id && sample.stack_id == 21)
-            })
-            .map(Invocation::duration_ns)
-            .max()
-            .unwrap();
-        let fast_total: u64 = profile
-            .invocations
-            .iter()
-            .filter(|invocation| {
-                profile
-                    .samples
-                    .iter()
-                    .any(|sample| sample.invocation_id == invocation.id && sample.stack_id == 20)
-            })
-            .map(Invocation::duration_ns)
-            .sum();
-        let slow_total: u64 = profile
-            .invocations
-            .iter()
-            .filter(|invocation| {
-                profile
-                    .samples
-                    .iter()
-                    .any(|sample| sample.invocation_id == invocation.id && sample.stack_id == 21)
-            })
-            .map(Invocation::duration_ns)
-            .sum();
-        assert_eq!(fast_total / 6_300, 10_000_000);
-        assert_eq!(slow_total / 2_700, 20_000_000);
-        assert_eq!(fast_max, 18_000_000);
-        assert_eq!(slow_min, 12_000_000);
-        assert_eq!(slow_max, 28_000_000);
-        assert!(fast_max > slow_min);
-        assert_eq!(
-            tail.root.children[0].children[0].name,
-            "BimodalFixture::slow_path()"
-        );
-        assert!(tail.off_cpu_ns > 0);
-    }
-
-    #[test]
-    fn off_cpu_profile_exposes_waiting_work_across_two_threads() {
-        let profile = off_cpu_profile();
-        let wall = execute_query(&profile, &query(PercentileRange::ALL)).unwrap();
-        let cpu = execute_query(
-            &profile,
-            &Query {
-                metric: Metric::Cpu,
-                ..query(PercentileRange::ALL)
-            },
-        )
-        .unwrap();
-        let off_cpu = execute_query(
-            &profile,
-            &Query {
-                metric: Metric::OffCpu,
-                ..query(PercentileRange::ALL)
-            },
-        )
-        .unwrap();
-        assert_eq!(profile.threads.len(), 2);
-        assert_eq!(wall.available_invocation_count, 16);
-        assert_eq!(wall.latency_min_ns, Some(20_000_000));
-        assert_eq!(wall.latency_max_ns, Some(40_000_000));
-        assert_eq!(cpu.root.value_ns, 32_000_000);
-        assert_eq!(off_cpu.root.value_ns, 448_000_000);
-        assert_eq!(
-            off_cpu.root.children[0].children[0].name,
-            "std::this_thread::sleep_for(...)"
-        );
     }
 }

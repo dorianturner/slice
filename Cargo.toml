@@ -1,6 +1,7 @@
 [workspace]
 members = [
   "crates/slice-core",
+  "crates/slice-capture",
   "crates/slice-collector",
   "crates/slice-ebpf",
   "crates/slice-render",

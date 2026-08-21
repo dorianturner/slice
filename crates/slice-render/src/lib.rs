@@ -103,7 +103,7 @@ h1,h2,p { margin:0; } h1 { font-size:clamp(2.5rem,6vw,5.2rem); line-height:.88; 
 .population { display:flex; justify-content:space-between; gap:18px; padding:29px 0 22px; } .population h2 { display:inline-block; margin-top:8px; padding:6px 9px; border:3px solid var(--ink); background:var(--cyan); box-shadow:4px 4px 0 var(--ink); font-size:1.35rem; } .population .muted { margin-top:14px; } .capture-meta { display:flex; flex-direction:column; gap:5px; color:#454545; font-size:.75rem; font-weight:700; text-align:right; font-variant-numeric:tabular-nums; }
 .timeline-section,.flame-section { border:3px solid var(--ink); border-radius:0; background:var(--paper); box-shadow:8px 8px 0 var(--ink); padding:18px; } .timeline-section { margin-bottom:18px; } .section-heading { display:flex; justify-content:space-between; align-items:center; gap:14px; margin-bottom:8px; } .timeline-actions { display:flex; align-items:center; justify-content:flex-end; gap:12px; min-width:0; } .value { color:var(--ink); font-variant-numeric:tabular-nums; } .timeline-scroll { height:280px; max-width:100%; display:grid; grid-template-columns:170px minmax(0,1fr); overflow:hidden; margin-top:14px; border:3px solid var(--ink); background:var(--paper); box-shadow:5px 5px 0 var(--ink); overscroll-behavior:contain; } .timeline-labels-scroll,.timeline-chart-scroll { min-width:0; min-height:0; overflow-y:auto; overflow-x:hidden; scrollbar-width:none; } .timeline-labels-scroll::-webkit-scrollbar { width:0; height:0; } .timeline-chart-scroll { overflow:auto; } #timeline-labels,#timeline { display:block; background:var(--paper); } #timeline-labels { width:170px; } #timeline { min-height:120px; touch-action:none; } .timeline-bg { fill:var(--paper); } .timeline-lane { fill:#ece7dc; } .timeline-selection { fill:var(--yellow); opacity:.84; stroke:var(--ink); stroke-width:4; vector-effect:non-scaling-stroke; pointer-events:none; } .timeline-invocation { fill:var(--purple); opacity:.88; cursor:pointer; } .timeline-invocation.selected { fill:var(--pink); opacity:1; } .timeline-invocation:hover { stroke:var(--ink); stroke-width:2; } .timeline-sample { fill:#31bfc5; opacity:.7; pointer-events:none; } .timeline-text,.timeline-axis { fill:var(--ink); font-size:10px; dominant-baseline:middle; } .timeline-axis { font-size:9px; font-weight:800; } .thread-label { cursor:pointer; } .thread-label.inactive { fill:#999; text-decoration:line-through; } .time-handle { stroke:var(--pink); stroke-width:4; pointer-events:none; vector-effect:non-scaling-stroke; } .time-handle-hit { fill:transparent; cursor:ew-resize; }
 .controls { display:grid; grid-template-columns:minmax(0,2.8fr) minmax(180px,1fr); gap:18px; margin:18px 0; } fieldset { min-width:0; margin:0; border:3px solid var(--ink); border-radius:0; background:var(--paper); box-shadow:6px 6px 0 var(--ink); padding:13px; } legend { display:flex; align-items:center; gap:10px; color:var(--ink); font-size:.8rem; font-weight:900; padding:0 5px; white-space:nowrap; } input,select,button { accent-color:var(--pink); } .range-editor { display:flex; align-items:center; gap:5px; color:var(--ink); font-variant-numeric:tabular-nums; white-space:nowrap; } #time-label { padding:6px 8px; border:3px solid var(--ink); background:var(--yellow); box-shadow:4px 4px 0 var(--ink); } .range-editor label { display:flex; align-items:center; gap:4px; color:var(--ink); font-size:.76rem; font-weight:800; } .range-input { width:108px; min-width:108px; background:#fff; color:var(--ink); border:2px solid var(--ink); border-radius:0; padding:5px 6px; font:inherit; font-weight:700; font-variant-numeric:tabular-nums; } .percentile-editor { display:inline-flex; gap:7px; margin-left:4px; font-size:.8rem; } .percentile-input { width:64px; min-width:64px; text-align:center; padding:3px 2px; } select { width:100%; background:#fff; border:2px solid var(--ink); border-radius:0; color:var(--ink); padding:6px; font-weight:700; } .histogram-bucket-control { display:flex; align-items:center; gap:5px; color:var(--ink); font-size:.76rem; font-weight:800; } .histogram-bucket-select { width:auto; min-width:84px; padding:3px 5px; font-size:.76rem; } .thread-picker { position:relative; flex:0 1 auto; min-width:180px; } .thread-picker summary { display:flex; align-items:center; justify-content:space-between; gap:12px; cursor:pointer; list-style:none; border:3px solid var(--ink); background:var(--cyan); box-shadow:4px 4px 0 var(--ink); color:var(--ink); padding:6px 8px; font-size:.78rem; font-weight:800; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; } .thread-picker summary::after { content:"▾"; flex:0 0 auto; font-size:1rem; line-height:1; } .thread-picker summary::-webkit-details-marker { display:none; } .thread-picker[open] summary { box-shadow:none; } .thread-list { position:absolute; z-index:3; left:0; right:0; display:grid; gap:4px; max-height:180px; overflow:auto; margin-top:3px; padding:7px; border:3px solid var(--ink); background:var(--paper); box-shadow:4px 4px 0 var(--ink); } .thread-list label { display:flex; gap:6px; align-items:center; padding:4px 5px; font-size:.74rem; font-weight:700; white-space:nowrap; cursor:pointer; } .control-help { color:#454545; font-size:.74rem; margin-top:10px; line-height:1.35; }
-#histogram { width:100%; height:86px; display:block; margin-bottom:4px; touch-action:none; } .histogram-rail { fill:#e2dccf; } .histogram-rail-selection { fill:#c9bfad; opacity:.95; stroke:var(--ink); stroke-width:3; } .hist-bar { fill:var(--cyan); } .hist-selected { fill:var(--pink); } .hist-label { fill:var(--ink); font-size:10px; font-weight:800; } .hist-axis-tick { stroke:#8c8170; stroke-width:1; } .hist-handle { stroke:var(--ink); stroke-width:3; stroke-dasharray:4 2; pointer-events:none; } .hist-handle-hit { fill:transparent; cursor:ew-resize; } .hist-window { fill:var(--yellow); opacity:.72; stroke:var(--ink); stroke-width:3; cursor:grab; }
+#histogram { width:100%; height:86px; display:block; margin-bottom:4px; touch-action:none; } .histogram-rail { fill:#e2dccf; } .histogram-rail-selection { fill:#c9bfad; opacity:.95; stroke:var(--ink); stroke-width:3; } .hist-bar { fill:var(--cyan); } .hist-bar.hist-empty { fill:#d9d1c3; stroke:#b8aa96; stroke-width:1; } .hist-selected { fill:var(--pink); } .hist-label { fill:var(--ink); font-size:10px; font-weight:800; } .hist-axis-tick { stroke:#8c8170; stroke-width:1; } .hist-handle { stroke:var(--ink); stroke-width:3; stroke-dasharray:4 2; pointer-events:none; } .hist-handle-hit { fill:transparent; cursor:ew-resize; } .hist-window { fill:var(--yellow); opacity:.72; stroke:var(--ink); stroke-width:3; cursor:grab; }
 .timeline-chart-scroll { overflow-x:scroll; overflow-y:auto; scrollbar-width:auto; }
 .flame-zoom-path { display:flex; align-items:center; flex-wrap:wrap; gap:5px; min-height:28px; margin:4px 0 8px; color:var(--ink); font-size:.76rem; } .flame-zoom-path button { padding:3px 7px; background:var(--cyan); border:2px solid var(--ink); font-size:.74rem; } .flame-zoom-path button[aria-current="page"] { color:var(--ink); background:var(--yellow); } .flame-zoom-separator { color:var(--ink); font-weight:900; }
 .summary { display:grid; grid-template-columns:repeat(3,1fr); gap:18px; margin:18px 0; } .summary>div { background:var(--pink); border:3px solid var(--ink); border-radius:0; box-shadow:6px 6px 0 var(--ink); padding:12px 15px; } .summary>div:nth-child(2) { background:var(--green); } .summary>div:nth-child(3) { background:var(--cyan); } .summary p { color:var(--ink); font-size:.76rem; font-weight:800; } .summary strong { display:block; margin-top:4px; font-size:1.2rem; font-variant-numeric:tabular-nums; } .summary span { display:block; margin-top:3px; color:var(--ink); font-size:.74rem; }
@@ -250,8 +250,19 @@ const JAVASCRIPT: &str = r##"
     svg.appendChild(rail);
     counts.forEach((value, index) => {
       const x = index * width / bins;
-      const h = value / peak * 76;
-      const bar = svgEl('rect', { class: 'hist-bar', x: x + 1, y: 98 - h, width: width / bins - 2, height: h, rx: 2 });
+      const h = value ? value / peak * 76 : 2;
+      const bar = svgEl('rect', { class: value ? 'hist-bar' : 'hist-bar hist-empty', x: x + 1, y: value ? 98 - h : 96, width: width / bins - 2, height: h, rx: 2 });
+      const bucketLow = min + index * span / bins;
+      const bucketHigh = min + (index + 1) * span / bins;
+      const bucketLabel = `${ns(bucketLow)}–${ns(bucketHigh)} (upper bound exclusive)`;
+      bar.setAttribute('data-frequency-range', bucketLabel);
+      bar.setAttribute('data-sample-count', value);
+      bar.setAttribute('aria-label', `Histogram bucket ${bucketLabel}; ${count(value)} samples (invocations)`);
+      const title = svgEl('title');
+      title.textContent = `Latency ${bucketLabel} · ${count(value)} samples (invocations)`;
+      bar.appendChild(title);
+      bar.addEventListener('mouseenter', event => showHistogramTooltip(event, bucketLow, bucketHigh, value));
+      bar.addEventListener('mouseleave', hideTooltip);
       bars.push(bar);
       svg.appendChild(bar);
     });
@@ -362,6 +373,7 @@ const JAVASCRIPT: &str = r##"
   */
   function placeTooltip(event) { const tooltip=id('flame-tooltip'), margin=12, gap=14, box=tooltip.getBoundingClientRect(), maxLeft=Math.max(margin,window.innerWidth-box.width-margin), maxTop=Math.max(margin,window.innerHeight-box.height-margin); let left=event.clientX+gap, top=event.clientY+gap; if(left+box.width>window.innerWidth-margin) left=event.clientX-gap-box.width; if(top+box.height>window.innerHeight-margin) top=event.clientY-gap-box.height; tooltip.style.left=`${Math.max(margin,Math.min(maxLeft,left))}px`; tooltip.style.top=`${Math.max(margin,Math.min(maxTop,top))}px`; }
   function showFrameTooltip(event,current) { const tooltip=id('flame-tooltip'); tooltip.innerHTML=`<strong>${escapeHtml(current.name)}</strong><span>Inclusive: ${ns(current.value)} · Self: ${ns(current.selfValue)}</span><span>Samples: ${count(current.sampleCount)} · Invocations: ${count(current.invocations.size)}</span><span>CPU: ${ns(current.cpu)} · Off-CPU: ${ns(current.off)}</span>`; tooltip.hidden=false; placeTooltip(event); }
+  function showHistogramTooltip(event, low, high, samples) { const tooltip=id('flame-tooltip'); tooltip.innerHTML=`<strong>Histogram bucket</strong><span>Latency: ${ns(low)}–${ns(high)} (upper bound exclusive)</span><span>Samples (invocations): ${count(samples)}</span>`; tooltip.hidden=false; placeTooltip(event); }
   function showTimelineTooltip(event,invocation) { const tooltip=id('flame-tooltip'); tooltip.innerHTML=`<strong>Invocation #${invocation.id}</strong><span>TID ${invocation.tid} · ${ns(invocation.end_ns-invocation.start_ns)} wall</span><span>Start ${ns(invocation.start_ns-bounds.from)} · End ${ns(invocation.end_ns-bounds.from)}</span>`; tooltip.hidden=false; placeTooltip(event); }
   function hideTooltip() { id('flame-tooltip').hidden=true; }
   function renderZoomPath() { const nav=id('flame-zoom-path'); if(!nav)return; nav.innerHTML=''; const add=(label,path,index)=>{if(index) {const separator=document.createElement('span');separator.className='flame-zoom-separator';separator.textContent='›';nav.appendChild(separator);} const button=document.createElement('button');button.type='button';button.textContent=label;button.title=label;if(index===zoomPath.length)button.setAttribute('aria-current','page');button.addEventListener('click',()=>{zoomPath=path;render();});nav.appendChild(button);}; add('All stacks',[],0); zoomPath.forEach((name,index)=>add(name,zoomPath.slice(0,index+1),index+1)); }
@@ -391,18 +403,89 @@ const JAVASCRIPT: &str = r##"
 #[cfg(test)]
 mod tests {
     use super::*;
-    use slice_core::{bimodal_profile, tail_divergence_profile};
+    use slice_core::{
+        CaptureQuality, ExecutionState, Frame, Function, Invocation, Metadata, Sample, Stack,
+        Thread,
+    };
+
+    fn profile() -> Profile {
+        Profile {
+            format_version: 1,
+            metadata: Metadata {
+                captured_at_unix_ns: 1,
+                command: vec!["test-program".to_owned()],
+                kernel_release: "test-kernel".to_owned(),
+                sample_period_ns: 1_000_000,
+            },
+            functions: vec![Function {
+                id: 1,
+                module: "test-module".to_owned(),
+                module_build_id: Some("test-build".to_owned()),
+                address: 0x1000,
+                name: "work".to_owned(),
+                demangled_name: "BimodalFixture::handle_request(unsigned long)".to_owned(),
+                source_file: None,
+                line: None,
+            }],
+            threads: vec![Thread {
+                tid: 10,
+                name: Some("worker".to_owned()),
+            }],
+            invocations: vec![Invocation {
+                id: 1,
+                function_id: 1,
+                parent_id: None,
+                tid: 10,
+                start_ns: 0,
+                end_ns: 20_000_000,
+                complete: true,
+                valid: true,
+            }],
+            stacks: vec![Stack {
+                id: 1,
+                frames: vec![
+                    Frame {
+                        function_id: Some(1),
+                        label: "BimodalFixture::handle_request(unsigned long)".to_owned(),
+                        module: Some("test-module".to_owned()),
+                        address: Some(0x1000),
+                    },
+                    Frame {
+                        function_id: None,
+                        label: "BimodalFixture::slow_path()".to_owned(),
+                        module: Some("test-module".to_owned()),
+                        address: None,
+                    },
+                ],
+            }],
+            samples: vec![Sample {
+                timestamp_ns: 10_000_000,
+                invocation_id: 1,
+                stack_id: 1,
+                tid: 10,
+                cpu: 0,
+                state: ExecutionState::OnCpu,
+                weight_ns: 20_000_000,
+            }],
+            quality: CaptureQuality {
+                events_generated: 2,
+                samples_generated: 1,
+                complete_invocations: 1,
+                ..CaptureQuality::default()
+            },
+        }
+    }
 
     #[test]
     fn report_is_one_offline_file_with_timeline_and_frame_details() {
-        let profile = bimodal_profile();
+        let profile = profile();
         let html = render_html(
             &profile,
             &Query {
                 function_id: 1,
                 threads: None,
                 time: None,
-                percentile: PercentileRange { low: 95, high: 100 },
+                percentile: PercentileRange::ALL,
                 metric: Metric::Wall,
             },
         )
@@ -442,6 +525,8 @@ mod tests {
         assert!(html.contains("histogram-bucket-size"));
         assert!(html.contains("histogramBucketSizeNs"));
         assert!(html.contains("const bucketSize = state.histogramBucketSizeNs"));
+        assert!(html.contains("data-frequency-range"));
+        assert!(html.contains("showHistogramTooltip"));
         assert!(html.contains("startValue:timelineValue"));
         assert!(html.contains("drag.rect"));
         assert!(!html.contains("startPercentile"));
@@ -460,24 +545,8 @@ mod tests {
     }
 
     #[test]
-    fn legacy_tail_profile_still_renders_the_known_culprit() {
-        let html = render_html(
-            &tail_divergence_profile(),
-            &Query {
-                function_id: 1,
-                threads: None,
-                time: None,
-                percentile: PercentileRange { low: 99, high: 100 },
-                metric: Metric::Wall,
-            },
-        )
-        .unwrap();
-        assert!(html.contains("SliceFixture::slow_tail_b()"));
-    }
-
-    #[test]
     fn renderer_rejects_invalid_profiles_before_creating_a_report() {
-        let mut profile = tail_divergence_profile();
+        let mut profile = profile();
         profile.samples[0].stack_id = 999;
         let error = render_html(
             &profile,

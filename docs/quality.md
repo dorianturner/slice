@@ -6,7 +6,7 @@ known gap changes.
 | Area | Grade | Evidence | Known gap |
 | --- | --- | --- | --- |
 | `slice-core` profile/query semantics | A | Deterministic unit tests and round-trip tests | Format migrations are not yet needed |
-| `slice-collector` correlation | A- | Synthetic event tests cover invalidation and quality counters | More property-based event streams would help |
+| `slice-collector` correlation | A | Synthetic tests cover invalidation, quality counters, and a late transport sample keyed by invocation ID | More property-based event streams would help |
 | `slice-render` offline output | A- | Self-contained HTML integration tests plus Node DOM smoke test | Full screenshot/accessibility audit still requires a browser runner |
 | `slice-ebpf` transport | B | Strict BPF compile and optional live capture | Live capture requires a dedicated runner |
 | Native fixtures | A- | CMake/CTest and ELF symbol discovery | Kernel behavior varies by host |

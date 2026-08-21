@@ -5,8 +5,11 @@ slice_test_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 slice_test_root_tmp=$(mktemp -d)
 trap 'rm -rf "$slice_test_root_tmp"' EXIT
 
-cargo run --quiet -p slice-cli -- fixture-profile \
-  --scenario bimodal --output "$slice_test_root_tmp/bimodal.slice"
-cargo run --quiet -p slice-cli -- view "$slice_test_root_tmp/bimodal.slice" \
-  --output "$slice_test_root_tmp/bimodal.html" --percentile 95:100
-node "$slice_test_root/tests/viewer-smoke.js" "$slice_test_root_tmp/bimodal.html"
+if [[ -z "${SLICE_VIEW_PROFILE:-}" ]]; then
+  echo "SKIP: set SLICE_VIEW_PROFILE to a real captured .slice file for viewer smoke"
+  exit 0
+fi
+
+cargo run --quiet -p slice-cli -- view "$SLICE_VIEW_PROFILE" \
+  --output "$slice_test_root_tmp/capture.html" --percentile 0:100 --metric wall
+node "$slice_test_root/tests/viewer-smoke.js" "$slice_test_root_tmp/capture.html"

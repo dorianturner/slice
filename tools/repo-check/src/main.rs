@@ -127,6 +127,7 @@ fn dependency_layers(root: &Path) -> Result<()> {
             .filter(|dependency| {
                 [
                     "slice-core",
+                    "slice-capture",
                     "slice-collector",
                     "slice-render",
                     "slice-ebpf",
@@ -142,16 +143,22 @@ fn dependency_layers(root: &Path) -> Result<()> {
 
     let expected = BTreeMap::from([
         ("slice-core", BTreeSet::new()),
+        ("slice-capture", BTreeSet::from(["slice-core".to_owned()])),
         ("slice-collector", BTreeSet::from(["slice-core".to_owned()])),
         ("slice-render", BTreeSet::from(["slice-core".to_owned()])),
         (
             "slice-ebpf",
-            BTreeSet::from(["slice-core".to_owned(), "slice-collector".to_owned()]),
+            BTreeSet::from([
+                "slice-capture".to_owned(),
+                "slice-core".to_owned(),
+                "slice-collector".to_owned(),
+            ]),
         ),
         (
             "slice-cli",
             BTreeSet::from([
                 "slice-core".to_owned(),
+                "slice-capture".to_owned(),
                 "slice-ebpf".to_owned(),
                 "slice-render".to_owned(),
             ]),

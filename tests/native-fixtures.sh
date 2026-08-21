@@ -16,5 +16,11 @@ slice_symbols=$(cargo run --quiet -p slice-cli -- symbols "$slice_test_build/tai
 grep -F $'\tSliceFixture::work(unsigned int)' <<<"$slice_symbols"
 bimodal_symbols=$(cargo run --quiet -p slice-cli -- symbols "$slice_test_build/bimodal_service" --match 'BimodalFixture::handle_request')
 grep -F $'\tBimodalFixture::handle_request(unsigned long)' <<<"$bimodal_symbols"
+bimodal_work_symbols=$(cargo run --quiet -p slice-cli -- symbols "$slice_test_build/bimodal_service" --match 'BimodalFixture::normal_distribution')
+grep -F $'\tBimodalFixture::normal_distribution' <<<"$bimodal_work_symbols"
+bimodal_spin_symbols=$(cargo run --quiet -p slice-cli -- symbols "$slice_test_build/bimodal_service" --match 'BimodalFixture::spin_for')
+grep -F $'\tBimodalFixture::spin_for' <<<"$bimodal_spin_symbols"
+bimodal_sleep_symbols=$(cargo run --quiet -p slice-cli -- symbols "$slice_test_build/bimodal_service" --match 'BimodalFixture::sleep_for')
+grep -F $'\tBimodalFixture::sleep_for' <<<"$bimodal_sleep_symbols"
 off_cpu_symbols=$(cargo run --quiet -p slice-cli -- symbols "$slice_test_build/off_cpu_wait" --match 'SliceFixture::sleep_work')
 grep -F $'\tSliceFixture::sleep_work(unsigned int)' <<<"$off_cpu_symbols"

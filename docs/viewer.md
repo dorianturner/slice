@@ -17,6 +17,8 @@ server or network access.
 - The histogram Bucket control defaults to Auto. Fixed choices use the selected
   time width, align the histogram bounds to that width, and redraw the bins
   without changing the selected invocation population.
+- Hovering a histogram bucket shows its latency interval and sample count
+  (one observation per invocation); the upper endpoint is exclusive.
 - The 0:100 percentile range includes every valid invocation. A narrower range
   is intentionally a population filter.
 
@@ -32,10 +34,13 @@ selected metric excludes its state, or when the compiler inlined it. Showing a
 complete call tree for every invocation would require call tracing or
 instrumentation; it is not what statistical stack sampling promises.
 
-The repository ships three deterministic offline scenarios for exercising the
-viewer without privileges: `tail` demonstrates percentile filtering, `bimodal`
-demonstrates overlapping multi-thread latency and all metrics, and `off-cpu`
-demonstrates wait-heavy attribution. The native `nested_population` workload
-is intentionally invalid and is reserved for collector quality handling. Real
-captures use the stacks returned by the eBPF/perf sampling path and therefore
-reflect the actual program and compiler output.
+The viewer consumes only captured `.slice` profiles. Real captures use the
+stacks returned by the eBPF/perf sampling path and therefore reflect the actual
+program and compiler output. A function can be absent when no sample landed in
+it, when the selected metric excludes its state, or when the compiler inlined
+it; the renderer never invents missing call frames.
+
+The native bimodal workload keeps its distribution and CPU-loop helpers out of
+line and performs real distribution work long enough for the sampler to observe
+them. Use `just regenerate-bimodal` for a wall-time report from that live
+capture.
