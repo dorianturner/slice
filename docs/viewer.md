@@ -34,12 +34,6 @@ selected metric excludes its state, or when the compiler inlined it. Showing a
 complete call tree for every invocation would require call tracing or
 instrumentation; it is not what statistical stack sampling promises.
 
-The viewer consumes only captured `.slice` profiles. Real captures use the
-stacks returned by the eBPF/perf sampling path and therefore reflect the actual
-program and compiler output. A function can be absent when no sample landed in
-it, when the selected metric excludes its state, or when the compiler inlined
-it; the renderer never invents missing call frames.
-
 The native bimodal workload keeps its distribution and CPU-loop helpers out of
 line and performs real distribution work long enough for the sampler to observe
 them. Use `just regenerate-bimodal` for a wall-time report from that live

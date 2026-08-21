@@ -6,17 +6,22 @@ The `.slice` file format is versioned and currently remains at format version 1.
 
 ## Hexagonal boundary
 
-```text
-                    inbound application
-                         slice-cli
-                        /         \
-                       v           v
-            slice-capture       slice-core
-             capture port      profile domain
-                   ^            ^    ^
-                   | implements |    | consumes
-             slice-ebpf      slice-collector  slice-render
-             Linux adapter       domain       HTML adapter
+The runtime boundary is a port implemented by the Linux adapter. Capture
+events flow through the collector into the profile domain; offline queries and
+rendering consume the same profile without knowing which adapter produced it.
+
+```mermaid
+flowchart LR
+    User["user"] --> CLI["slice-cli<br/>application shell"]
+    CLI -->|capture request| Port["slice-capture<br/>CapturePort"]
+    Port -. implemented by .-> Adapter["slice-ebpf<br/>LinuxCaptureAdapter"]
+    Adapter -->|BPF events + identity data| Collector["slice-collector<br/>correlator"]
+    Adapter --> Kernel["Linux kernel<br/>uprobe-multi + perf + sched_switch"]
+    Collector -->|validated invocations and samples| Core["slice-core<br/>Profile + query"]
+    CLI -->|offline query| Core
+    Core -->|selected data| Render["slice-render<br/>self-contained HTML"]
+    Core --> Store[".slice v1<br/>compressed profile"]
+    Future["future capture adapter"] -. implements .-> Port
 ```
 
 `slice-capture` is the inbound port for live profiling. It owns platform-neutral
@@ -46,6 +51,56 @@ The allowed internal dependency edges are:
 
 The `repo-check` tool validates these edges in CI. New edges require an
 architecture document and an execution plan before they are added.
+
+The package-level dependency direction is intentionally separate from the
+runtime event flow above: arrows here mean “may depend on,” not “sends an
+event to.”
+
+```mermaid
+flowchart TB
+    CLI["slice-cli"] --> Capture["slice-capture"]
+    CLI --> Core["slice-core"]
+    CLI --> Render["slice-render"]
+    CLI --> EBPF["slice-ebpf"]
+    Capture --> Core
+    Collector["slice-collector"] --> Core
+    Render --> Core
+    EBPF --> Capture
+    EBPF --> Collector
+    EBPF --> Core
+```
+
+## Capture and analysis sequence
+
+The invocation ID is transport metadata, not a profile filter. The adapter
+preserves it while replaying records in kernel-timestamp order; the collector
+uses it to keep samples with their invocation. Once the profile is written,
+wall, CPU, off-CPU, thread, time, and percentile filters remain offline query
+operations over the same validated data.
+
+```mermaid
+sequenceDiagram
+    participant User as User
+    participant CLI as slice-cli
+    participant Adapter as Linux adapter
+    participant Kernel as Linux kernel
+    participant Collector as slice-collector
+    participant Core as slice-core
+    participant Render as slice-render
+
+    User->>CLI: profile --function ...
+    CLI->>Adapter: CapturePort request
+    Adapter->>Kernel: attach probes, sampler, sched_switch
+    Kernel-->>Adapter: entry / return / on-CPU / off-CPU records
+    Adapter->>Collector: timestamp-ordered events with invocation IDs
+    Collector->>Core: validated Profile
+    Core-->>Adapter: Profile and quality counters
+    Adapter-->>CLI: capture result
+    User->>CLI: view profile.slice --metric off-cpu --percentile ...
+    CLI->>Core: offline query
+    Core->>Render: selected profile data
+    Render-->>User: self-contained HTML report
+```
 
 ## Boundary rules
 

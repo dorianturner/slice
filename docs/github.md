@@ -29,23 +29,25 @@ an approved `OPENAI_API_KEY` secret.
 the repository has no capable self-hosted runner. It must be promoted to a
 required check only after such a runner is provisioned.
 
-The `main` branch must require pull requests, all five required checks, up-to-date
-branches, merge queue participation, squash merges, and no ordinary bypass.
-Direct pushes should be disabled. Configure these settings with a GitHub
-ruleset or equivalent repository administration; committed workflow files alone
-cannot enforce branch protection. The committed
+The `main` branch must require pull requests, all five required checks,
+up-to-date branches, squash merges, and no ordinary bypass. Direct pushes
+should be disabled. A merge queue is preferred when the account supports the
+required ruleset, but it is not currently available on this personal
+repository. Configure these settings with a GitHub ruleset or equivalent
+repository administration; committed workflow files alone cannot enforce
+branch protection. The committed
 [`scripts/apply-github-protection.sh`](../scripts/apply-github-protection.sh)
 applies branch protection, repository merge settings, selected-action policy,
-and the `main-agentic-gate` ruleset through `gh`. The current personal GitHub
-repository rejects the merge-queue rule through the available API, so the
-repository uses strict up-to-date checks and auto-merge until GitHub account
-support for a required queue is available.
+and the `main-agentic-gate` ruleset through `gh`. Until queue support is
+available, use a passing pull request with strict up-to-date checks and a
+squash merge (or auto-merge configured to do the same).
 
 ## Agent permissions
 
 The agent identity may create branches, open/update PRs, request checks, and
-merge through the merge queue. It must not receive broad organization access,
-repository secrets, or arbitrary workflow administration permissions.
+merge a passing pull request according to the repository's configured squash
+or queue policy. It must not receive broad organization access, repository
+secrets, or arbitrary workflow administration permissions.
 
 The local Codex completion hook remains available because it runs the ordinary
 no-key repository checks through `just check`. It does not enter a Nix

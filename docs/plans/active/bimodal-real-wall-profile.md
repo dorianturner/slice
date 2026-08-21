@@ -8,7 +8,9 @@ checked-out viewer artifact use a live capture only.
 
 ## Interfaces and scope
 
-- Keep the `.slice` schema, collector contract, and dependency layers intact.
+- Keep the `.slice` schema and dependency layers intact. Transport-level
+  invocation identity may evolve so the collector can correlate live records
+  without changing offline profile semantics.
 - Give the native fixture an out-of-line distribution workload that executes
   `std::normal_distribution` enough to be observable by the existing sampler.
 - Require the live wall-time capture check to expose both paths, `spin_for`, and

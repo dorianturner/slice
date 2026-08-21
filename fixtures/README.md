@@ -32,31 +32,18 @@ The native workload keeps its real `normal_distribution()`, `spin_for()`, and
 provides a stable frame above the inline standard-library sleep wrapper on a
 blocked stack. This makes both CPU and off-CPU behavior observable without
 inserting synthetic stack data. Generate the inspectable report from an actual
-capture with:
+capture with the repository wrapper:
 
 ```bash
-cmake -S fixtures -B build/fixtures -G Ninja
-cmake --build build/fixtures
-cargo build --release -p slice-cli
-
-SLICE="$PWD/target/release/slice"
-BUILD="$PWD/build/fixtures"
-sudo "$SLICE" doctor
-"$SLICE" symbols "$BUILD/bimodal_service" --match handle_request
-
-sudo "$SLICE" profile \
-  --module "$BUILD/bimodal_service" \
-  --function 'BimodalFixture::handle_request(unsigned long)' \
-  --output "$PWD/bimodal.slice" \
-  "$BUILD/bimodal_service" -- \
-  --workers 10 --iterations 400
-"$SLICE" validate "$PWD/bimodal.slice" \
-  --require-complete --require-samples --require-off-cpu
-"$SLICE" discover "$PWD/bimodal.slice" --metric off-cpu
-"$SLICE" view "$PWD/bimodal.slice" \
-  --output "$PWD/bimodal-neo-brutalist.html" \
-  --percentile 0:100 --metric wall
+just regenerate-bimodal
 ```
+
+The wrapper builds in a temporary directory, builds the release CLI, runs the
+doctor and live capture steps with the required privilege, validates the
+result, and atomically replaces `bimodal.slice` before rendering the report.
+Set `SLICE_BIMODAL_WORKERS` or `SLICE_BIMODAL_ITERATIONS` to adjust the finite
+fixture run. To inspect each low-level command, use the root
+[README walkthrough](../README.md#profile-the-bimodal-fixture).
 
 The capture command requires Linux 6.6+, BPF/perf privileges, kernel BTF, and
 the `sched_switch` tracepoint. The launch form stops the child before it
@@ -70,11 +57,6 @@ For the optional viewer smoke test against that real capture:
 
 ```bash
 SLICE_VIEW_PROFILE="$PWD/bimodal.slice" just test-viewer
-```
-
-```bash
-./build/fixtures/bimodal_service --workers 10
-slice symbols build/fixtures/bimodal_service --match handle_request
 ```
 
 ## Fixture matrix

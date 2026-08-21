@@ -10,7 +10,9 @@ an adapter, and make failures diagnosable across WSL, native Ubuntu, and NixOS.
 - Add `slice-capture` with platform-neutral capture, process identity, doctor,
   and error contracts.
 - Make `slice-ebpf::LinuxCaptureAdapter` implement the capture port.
-- Keep `.slice` format version 1 and collector semantics unchanged.
+- Keep `.slice` format version 1. The collector may consume transport identity
+  metadata, but the profile semantics and offline filter contract remain
+  stable.
 - Scope Linux entry/return through PID-scoped uprobe-multi links and scope
   sampling/scheduler events through `active_by_tid`, avoiding PID-namespace
   comparisons in BPF.
