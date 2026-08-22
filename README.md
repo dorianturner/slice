@@ -16,6 +16,8 @@ It resolves ELF symbols, correlates invocation IDs, and renders a self-contained
 
 The viewer lets you compare the complete population with a latency tail, then switch between wall time, on-CPU time, and off-CPU time without capturing again.
 
+**You can view a live demo at** https://dorianturner.github.io/assets/slice/bimodal.html
+
 <p align="center">
   <img src="docs/assets/p0-p100.png" alt="Slice viewer showing the complete bimodal population" width="49%">
   <img src="docs/assets/p95-p100.png" alt="Slice viewer showing the p95 to p100 slow tail" width="49%">
