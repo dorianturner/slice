@@ -24,7 +24,7 @@ jobs:
           persist-credentials: false
       - name: Run Codex review
         id: codex-review
-        uses: openai/codex-action@b11346a6fa031e2e164ab4b7c7ea201afffd7d59
+        uses: openai/codex-action@13e9c17417b29e9a276f73ec6ed7fb574137d3c3
         with:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
           prompt-file: .github/codex/prompts/review.md
