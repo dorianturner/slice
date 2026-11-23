@@ -4,6 +4,8 @@
   <img src="docs/assets/slice_logo.svg" alt="Slice logo" width="420">
 </p>
 
+**Entirely vibe coded as a proof of concept to see if this view could find the performance points I wanted to see**
+
 Slice is a Linux x86-64 percentile profiler for one focused question:
 
 > What does the call stack look like during the slowest executions of one C++ function?
